@@ -1,0 +1,12 @@
+Component,Selected Technology / Model,Role & Justification (Optimized for 12GB VRAM)
+LLM Runner,Ollama (full GPU acceleration),"Proven, simple local inference with seamless GGUF support and fast model switching."
+Core LLM,Dolphin 3.0 Llama-3.1 8B (abliterated/uncensored),"Top-ranked uncensored 8B model in 2025: exceptional reasoning, steerability, coding, and compliance via system prompts. Runs blazing fast (~80-100+ tokens/sec) on your GPU."
+Image Generation,FLUX.1 [dev] or FLUX.1 Schnell,"2025 state-of-the-art open-source image model: superior photorealism, prompt adherence, anatomy, and text rendering. Efficient on 12GB VRAM."
+Video Generation,Wan 2.1 / Wan 2.2 (1.3B-14B variants),"Best low-VRAM video model in 2025: generates short clips (8-30s) efficiently (~8-12GB VRAM), with strong motion and quality."
+Multimodal Analysis,Qwen2.5-VL 7B-32B (quantized),Leading local VLM for image/video/document understanding and summarization; excellent OCR and reasoning. Fits quantized on 12GB.
+Framework / Agents,LangChain,"Robust tool integration, agents, and RAG orchestration."
+Memory / RAG,ChromaDB + Sentence Transformers (all-MiniLM-L6),Efficient long-term user memory and retrieval for personalization.
+Fine-Tuning,Unsloth (LoRA),Fastest GPU-based LoRA fine-tuning for personalizing the core LLM on your dataset.
+Voice / TTS,Piper TTS,High-quality local TTS with customizable voices for your persona.
+Frontend / Hosting,Open WebUI (latest 2025 version),"Feature-rich interface: persistent artifacts, notes, voice calls, PWA support, functions/tools, RAG enhancements. Bound to LAN IP."
+Network Access,OpenVPN (using your router-exported .ovpn config),"Secure, trusted device access via your existing home VPN setup."
