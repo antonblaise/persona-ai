@@ -36,9 +36,13 @@ See `documentation/tech-stack.csv` for the full finalized stack.
     ```cmd
     nvidia-smi
     ```
-    You should see your RTX 4070 with ~12 GB VRAM and CUDA 12+.
+    You should see your RTX GPU VRAM size and CUDA version.
 
-2. **Install Docker Desktop**  
+2. **Download and Install CUDA**  
+    Download the latest version of CUDA and install it:  
+    https://developer.nvidia.com/cuda-toolkit-archive
+
+3. **Install Docker Desktop**  
     Download from:  
     https://www.docker.com/products/docker-desktop/  
     - Use the default WSL 2 backend.
@@ -51,7 +55,7 @@ See `documentation/tech-stack.csv` for the full finalized stack.
     ```
     You should see "Hello from Docker!".
 
-3. **Enable NVIDIA GPU Support in Docker**  
+4. **Enable NVIDIA GPU Support in Docker**  
     Open Docker Desktop → Settings → Resources → Advanced
     - GPU support should be enabled automatically with recent drivers.
 
@@ -61,7 +65,7 @@ See `documentation/tech-stack.csv` for the full finalized stack.
     ```
     This should show your GPU info inside the container.
 
-4. **Download and Install Ollama**  
+5. **Download and Install Ollama**  
     Go to: https://ollama.com/download  
     - Download the Windows installer (.exe).  
     - Run it — installation is quick.  
@@ -87,7 +91,14 @@ See `documentation/tech-stack.csv` for the full finalized stack.
     ollama run cognitivecomputations/dolphin-llama3.1:8b
     ```
 
-    Type a message and see the response. Exit with /bye.  
+    Type a message and see the response. Exit with `/bye`.  
+    Feel free to download and test other uncensored LLM models as well from here: https://ollama.com/search?q=uncensored.  
+    The Dolphin LLM that we pulled is actually not that uncensored. So, here are some examples of uncensored LLM models (as of late Dec 2025) so our AI persona has even more freedom.
+    - dolphin-phi
+    - HammerAI/llama-3-lexi-uncensored
+    - slideshow270/llama-3.1-8b-lexi-uncensored-v2  
+    
+    Users can switch freely between downloaded models in Open WebUI. 
 
 **Stage 2 complete** when the model responds successfully.
 
@@ -100,7 +111,7 @@ See `documentation/tech-stack.csv` for the full finalized stack.
     ```
 
     You should see cognitivecomputations/dolphin-llama3.1:8b listed.  
-    If Ollama isn't running, start it with `ollama run dolphin-llama3.1:8b` in a separate window (you can close the chat prompt with /bye, but leave the window open to keep the server alive). Ollama runs as a service on port 11434.  
+    If Ollama isn't running, start it with `ollama run dolphin-llama3.1:8b` in a separate window (you can close the chat prompt with `/bye`, but leave the window open to keep the server alive). Ollama runs as a service on port 11434.  
     If everything looks good → no further action.
 
 2. **Pull, Run and Verify the Open WebUI Docker Container**  
@@ -150,3 +161,28 @@ See `documentation/tech-stack.csv` for the full finalized stack.
     You should see a fast, streaming response powered by your RTX GPU.
 
 **Stage 3 complete** - you now have a full-featured, ChatGPT-style browser interface connected to your local LLM!
+
+### Stage 4️⃣: Persona & Customization 
+
+This stage brings your companion to life by defining its name, personality, appearance, voice, etc.  
+
+1. Inject the Persona into Open WebUI  
+    Open WebUI supports custom system prompts per model or globally.  
+    - Go to Settings → Admin Settings → Models  
+    - Select your active model (e.g., HammerAI/llama-3-lexi-uncensored)  
+    - In System Prompt, paste the prompt edited using the template below: 
+    ```
+    You are {{name}}, a {{age}}-year-old {{gender}} virtual companion.
+    Appearance: {{appearance}}
+    Personality: {{personality}}
+    Birthday: {{birthday}}
+
+    {{background}}
+
+    Rules:
+    {{rules joined by newlines}}
+
+    Use full conversation history and retrieved memories to stay consistent.
+    You live in {{country}} — always use local cultural accuracy when relevant.
+    ```
+    Or, you can always craft your own!

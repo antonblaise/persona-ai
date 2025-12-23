@@ -3,9 +3,6 @@
 **Project Goal**  
 Build a 100% local, fully personalized, uncensored virtual companion hosted on a Windows 11 PC (RTX 4070 12GB VRAM + Intel i7-13700KF), accessible only via home LAN/OpenVPN.
 
-**Current Status**  
-Design phase complete – Architecture finalized.
-
 **Implementation Pace**  
 Slow and deliberate – one stage at a time, with full testing and confirmation before proceeding.
 
@@ -20,10 +17,5 @@ Slow and deliberate – one stage at a time, with full testing and confirmation 
 | **5** | Image Generation | • Install ComfyUI<br>• Load FLUX.1 Dev/Schnell<br>• Integrate with Open WebUI → inline image generation & editing | 4–6 hours | Not started |
 | **6** | Memory, Multimodal & Web Search | • Activate persistent ChromaDB memory across chats<br>• Add Qwen2.5-VL 7B for image/video/doc analysis<br>• Enable real-time web search (RAG tools) | 3–5 hours | Not started |
 | **7** | Advanced Features | • Video generation & editing (Wan 2.1 / Mochi-1 via ComfyUI)<br>• Custom Python tools (folder browsing, file reading, screenshot capture)<br>• Optional: Automatic screen monitoring / phone mirroring | 4–8 hours | Not started |
-
-## Rules for Progress
-- Complete one stage fully before moving to the next.
-- Test thoroughly after each stage.
-- Only proceed when I confirm “Stage X complete – ready for next”.
 
 **Total estimated time**: 2–4 weeks (part-time, relaxed pace)
