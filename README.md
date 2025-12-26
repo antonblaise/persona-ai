@@ -77,7 +77,7 @@ See `documentation/tech-stack.csv` for the full finalized stack.
 
 **Stage 1 complete** - your environment is ready.
 
-### Stage 2️⃣: Pull the Core LLM
+### Stage 2️⃣: Pull the LLM models
 
 1. Pull the Core LLM Model
     Recommended starting model: cognitivecomputations/dolphin-llama3.1:8b (uncensored, ~4.7 GB Q4 quantized - fast and capable on 12 GB VRAM).  
@@ -102,9 +102,11 @@ See `documentation/tech-stack.csv` for the full finalized stack.
 
 **Stage 2 complete** when the model responds successfully.
 
-### Stage 3️⃣: Open WebUI Deployment
+### Stage 3️⃣: Chainlit UI Deployment
 
-1. Make sure Ollama is running in the background:  
+In this stage, we will make use of the open-source customizable [Chainlit UI](https://docs.chainlit.io/get-started/overview) to run the AI persona.
+
+1. First, we need to make sure Ollama is running in the background:  
     Open a new Command Prompt or PowerShell and run:
     ```cmd
     ollama list
@@ -114,75 +116,182 @@ See `documentation/tech-stack.csv` for the full finalized stack.
     If Ollama isn't running, start it with `ollama run dolphin-llama3.1:8b` in a separate window (you can close the chat prompt with `/bye`, but leave the window open to keep the server alive). Ollama runs as a service on port 11434.  
     If everything looks good → no further action.
 
-2. **Pull, Run and Verify the Open WebUI Docker Container**  
-    In PowerShell or Command Prompt (run as normal user, no admin needed), execute this single command:  
-    ```powershell
-    docker run -d -p 0.0.0.0:8080:8080 --add-host=host.docker.internal:host-gateway -v open-webui:/app/backend/data --name open-webui --restart always ghcr.io/open-webui/open-webui:cuda
+2. Download and Install PostgreSQL  
+    PostgreSQL acts as the database to store the memories of the AI persona. When implemented, we enable data persistence on Chainlit.  
+    Download and install it from here: https://www.postgresql.org/download/  
+    For chat history and side bar to be enabled, Chainlit requires authentication and data persistence to be enabled beforehand.  
+
+3. Install `chainlit` using `pip` and make sure it works.
+    Open a new Command Prompt or PowerShell and run:
+    ```cmd
+    pip install chainlit
     ```
-    This command pulls the official CUDA-optimized image and connects it to your host Ollama instance.  
-    Explanation of the flags:  
-    - `-d`: Run in detached (background) mode  
-    - `-p 8080:8080`: Map container port 8080 to your host port 8080 (we'll access via http://localhost:8080)  
-    - `--add-host=host.docker.internal:host-gateway`: Allows the container to reach your host's Ollama at http://host.docker.internal:11434  
-    - `-v open-webui:/app/backend/data`: Persistent volume for chats, settings, etc.  
-    - `--name open-webui`: Easy name to manage later  
-    - `--restart always`: Auto-start on boot  
-    - `ghcr.io/open-webui/open-webui:cuda`: The official GPU-enabled image (uses your RTX GPU)  
+    And then, run this command to test it:
+    ```cmd
+    chainlit hello
+    ```
+    This will run Chainlit and open the UI on your browser. It's on the address http://localhost:8000.  
+    Notice that it starts up as very basic - just a plain chat, no login page, no side bar with chat histories, and using Chainlit logo everywhere.  
+    Those features can actually be enabled, so no worries.
+    Besides, as Chainlit allows extensive rebranding (as of late December 2025), we can greatly customize this Chainlit UI to fit our AI persona's themes.  
 
-    The first run will download the image (~2-3 GB) — it may take 5–15 minutes depending on your internet.  
-    Expected output: A long container ID (e.g., `ac3482bffbf1...`) will be printed — this means the container started successfully.  
-    Verify in Docker Desktop:
-    - Open Docker Desktop
-    - Go to the **Containers** tab
-    - You should see a container named **open-webui** with status **Running**
-    - If it's not running, check **Logs** for errors.
+4. Chainlit Configuration  
+    First of all, for chat history and sidebar to be enabled, we need to integrate PostgreSQL to Chainlit.  
 
+    - **Create database for the AI**  
+        Open `pgAdmin` on your computer.  
+        On `Object Explorer` panel, right-click on `Servers > PostgreSQL > Databases`.  
+        Then click on `Create > Database`.  
+        Give it a name, and then click `Save`.  
+        The newly created database now shows under `Databases`.  
 
-3. **Access Open WebUI in Your Browser**
-
-    - Open your web browser and go to:  
-        **http://localhost:8080**
-
-    - On first launch, you will be prompted to create an admin account:
-        - Choose a username (e.g., your name or "admin")
-        - Set a strong password
-        - Click **Create Account** or **Sign Up**
-
-    - After signing in, you’ll land on the main chat dashboard.
-
-    - In the top-left corner, click the model selector dropdown.
-        - Select **cognitivecomputations/dolphin-llama3.1:8b**
-
-    - Click **New Chat** (or the + button) and send a test message:
+    - **Imprint the Prisma schema of Chainlit datalayer to the database**  
+        In a folder **outside** of this project folder, clone the [chainlit-datalayer](https://github.com/Chainlit/chainlit-datalayer) repository:
+        ```cmd
+        git clone https://github.com/Chainlit/chainlit-datalayer
         ```
-        Hello, can you hear me?
+        Navigate into the `chainlit-datalayer` folder, create a file named `.env` in its root directory.
+        Edit this line and paste it into `.env`:
+        ```
+        DATABASE_URL=postgresql://<database owner name>:<password>@localhost:5432/<database name>
+        ```
+        For example:
+        ```
+        DATABASE_URL=postgresql://postgres:postgres_Password@localhost:5432/persona-ai
+        ```
+        Now, still in the root directory, run:
+        ```
+        npx prisma migrate deploy
+        ```
+    
+    - **Setup Chainlit environment in our project**  
+        Copy the `.env` file created in `chainlit-datalayer` folder just now into this project's root directory.  
+        Run this command in this project's root directory:
+        ```
+        chainlit create-secret
+        ```
+        This will create the Chainlit JWT secret needed to run the Python script that powers Chainlit ─ `app.py`.
+        Copy the whole line into the `.env` file.
+        Now, the `.env` file should look like this:
+        ```
+        DATABASE_URL=postgresql://<database owner name>:<password>@localhost:5432/<database name>
+        CHAINLIT_AUTH_SECRET="*abcdefghijklmnopqrstuvwxyz!@#$%^&><:?0123456789"
         ```
 
-    You should see a fast, streaming response powered by your RTX GPU.
+5. Chainlit setup for `app.py`  
+    Now, we must create a folder named `public` under the root directory.  
+    In that folder, create two files: `users.txt` and `system-prompt.txt` (optional).  
+    - `users.txt`
+        A file to store user credentials in the form of `username,password`.  
+        Fill in the file with the allowed credentials.  
+        Example:
+        ```
+        admin,admin_Password
+        janedoe,jane123doe456
+        ```
+        This file must be present, or the app won't start.  
+        Of course, you can also omit the authentication altogether, but please note that chat histories and side bar **cannot** be enabled without authentication and data layer both implemented.  
+
+    - `system-prompt.txt`  
+        A system prompt is a prompt fed into the AI to define its details.  
+        This file is optional, as no system prompt simply means to use the AI model as is.
+        Example of system prompt:
+        ```
+        You are {{name}}, a {{age}}-year-old {{gender}} virtual companion.
+        Appearance: {{appearance}}
+        Personality: {{personality}}
+        Birthday: {{birthday}}
+
+        {{other details and backgrounds}}
+
+        Rules:
+        {{rules joined by newlines}}
+
+        Use full conversation history and retrieved memories to stay consistent.
+        You live in {{country}} — always use local cultural accuracy when relevant.
+        ```  
+
+        Feel free to modify `app.py` and `system-prompt.txt` as you need.
+    
+    ```
+    persona-ai/
+    ├── public/
+    |   ├── users.txt
+    |   └── system-prompt.txt (optional)
+    └── app.py
+    ```
+
+    
+6. Chainlit UI Customization  
+    Chainlit offers deep customization of it UI. Here, we will go through some of the basics:  
+
+    ```
+    persona-ai/
+    ├── .chainlit/
+    |   ├── translations/
+    |   |   └── en-US.json              <----- Login page wordings
+    |   └── config.toml                 <----- Assistant name, session timeouts, default theme, login page image and filters
+    ├── public/
+    |   ├── avatars/
+    |   |   └── <assistant name>.png    <----- Assistant's chat avatar
+    |   ├── login.png                   <----- (can be any name) Login page background
+    |   ├── logo_dark.png               <----- Logo used in dark theme
+    |   ├── logo_light.png              <----- Logo used in light theme
+    |   ├── favicon.png                 <----- Browser tab icon
+    |   ├── system-prompt.txt
+    |   └── users.txt
+    └── chainlit.md                     <----- Readme button content
+    ```
+
+    *Note: You can also use .jpg and .gif instead of .png files, but we'll use .png as the example.*
+
+    - Persona browser tab name and icon
+        Browser tab name ─ edit `config.toml`:
+        ```
+        [UI]
+        # Name of the assistant.
+        name = <assistant name>
+        ```
+        As for tab icon, name your picture as `favicon.png` and place it in `public` folder.
+    
+    - Login page ─ background image and wordings
+        Put the picture (of any name) in `public` folder.   
+        Then, edit this line in `config.toml`:  
+        ```
+        [UI]
+        ...
+        login_page_image = "./public/<login background image file>"
+        ```
+        Then, go to `en-US.json` and edit this part to change the browser tab name:
+        ```
+        "auth": {
+            "login": {
+                "title": "<browser tab name>",
+                ...
+        ```
+    
+    - Persona avatar
+        Put the picture `public/avatars` and name it as `<assistant name>.png`.
+    
+    - Remove `Readme` button in chat space 
+        Make `chainlit.md` blank, and the `Readme` button in the chat space will be gone.
+    
+    - Disable session timeouts
+        Comment out (#) these two options in `config.toml`:
+        ```
+        [project]
+        # Duration (in seconds) during which the session is saved when the connection is lost
+        # session_timeout = 3600
+
+        # Duration (in seconds) of the user session expiry
+        # user_session_timeout = 1296000  # 15 days
+        ```
+    
+    Feel free to explore and experiment around for more customizations!
+     
+    
+
 
 **Stage 3 complete** - you now have a full-featured, ChatGPT-style browser interface connected to your local LLM!
 
-### Stage 4️⃣: Persona & Customization 
-
-This stage brings your companion to life by defining its name, personality, appearance, voice, etc.  
-
-1. Inject the Persona into Open WebUI  
-    Open WebUI supports custom system prompts per model or globally.  
-    - Go to Settings → Admin Settings → Models  
-    - Select your active model (e.g., HammerAI/llama-3-lexi-uncensored)  
-    - In System Prompt, paste the prompt edited using the template below: 
-    ```
-    You are {{name}}, a {{age}}-year-old {{gender}} virtual companion.
-    Appearance: {{appearance}}
-    Personality: {{personality}}
-    Birthday: {{birthday}}
-
-    {{background}}
-
-    Rules:
-    {{rules joined by newlines}}
-
-    Use full conversation history and retrieved memories to stay consistent.
-    You live in {{country}} — always use local cultural accuracy when relevant.
-    ```
-    Or, you can always craft your own!
+### Stage 4️⃣: ...

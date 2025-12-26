@@ -11,7 +11,7 @@ Your hardware is strong: RTX 4070 (12GB VRAM) for fast GPU-accelerated inference
 
 3. **Identify Resources**:
    - Hardware: RTX 4070 (12GB VRAM, CUDA-enabled) + i7-13700KF = excellent for parallel AI workloads. Install latest NVIDIA drivers + CUDA 12.x.
-   - Software: Open WebUI, Ollama (GPU support), LangChain, ChromaDB. VPN: WireGuard/Tailscale.
+   - Software: Chainlit (frontend), Ollama (GPU support), LangChain, ChromaDB. VPN: OpenVPN (using .ovpn config).
    - Budget: Free/open-source.
 
 4. **Timeline and Milestones**: 2-4 weeks part-time. Add GPU verification milestone.
@@ -20,14 +20,14 @@ Your hardware is strong: RTX 4070 (12GB VRAM) for fast GPU-accelerated inference
    - Risks: VRAM limits for very large models (e.g., no full 70B), video gen slow for long clips.
    - Mitigation: Use quantization (Q4/Q5 GGUF); start with 8-13B models; offload layers if needed.
 
-### Analysis Phase (Adjusted)
+### Analysis Phase
 High feasibility; 12GB VRAM ideal for 7-27B quantized models.
 
 1. **Requirements Breakdown**:
    - **Modular Architecture**: Core LLM (uncensored 8-13B or quantized larger). Modules: Persona config, Memory (vector DB), Tools (web/image/video), Multimodal for media.
    - **Personalization**: LoRA fine-tune on personal data.
    - **Uncensored**: Models without RLHF (e.g., Dolphin-Llama3, uncensored Qwen/Gemma).
-   - **Hosting**: Open WebUI on LAN IP; VPN access.
+   - **Hosting**: Chainlit UI on LAN IP; VPN access.
 
 2. **Feasibility Analysis**:
    - Your GPU handles Stable Diffusion/SDXL fully; short videos via SVD/AnimateDiff. Multimodal via LLaVA/Phi-3-Vision.
@@ -35,11 +35,11 @@ High feasibility; 12GB VRAM ideal for 7-27B quantized models.
 3. **Technology Stack**:
    - LLM: Ollama with GPU (quantized GGUF models).
    - Framework: LangChain for tools.
-   - UI: Open WebUI.
+   - UI: Chainlit (Python-based frontend).
    - CUDA libs for PyTorch/Diffusers.
 
-### Design Phase (Adjusted)
-1. **High-Level Architecture**: Frontend (Open WebUI via VPN/LAN) → LLM Agent → Modules/Tools → Memory update.
+### Design Phase
+1. **High-Level Architecture**: Frontend (Chainlit UI via VPN/LAN) → LLM Agent → Modules/Tools → Memory update.
 
 2. **Detailed Designs**:
    - Persona: JSON config in system prompt.
@@ -48,11 +48,11 @@ High feasibility; 12GB VRAM ideal for 7-27B quantized models.
    - Voice: Piper/Coqui TTS (GPU optional).
    - Security: Trusted users only.
 
-### Implementation Phase (Adjusted)
+### Implementation Phase
 1. **Setup Environment**:
    - Install CUDA/drivers; verify nvidia-smi (shows ~12GB).
    - Ollama: Enable full GPU offload.
-   - Open WebUI: Docker with --gpus all, bind LAN IP.
+   - Chainlit: Install via pip, run Python app with LAN binding.
 
 2. **Build Core Modules**:
    - LLM: ollama pull llama3.1:8b (uncensored variant) or qwen2.5:14b Q5.
@@ -62,7 +62,7 @@ High feasibility; 12GB VRAM ideal for 7-27B quantized models.
 
 3. **Personalization**: Collect data; LoRA train (minutes-hours).
 
-### Testing/Deployment/Maintenance (Adjusted)
+### Testing/Deployment/Maintenance
 - Test VRAM usage; ensure quantization for larger models.
 - Deploy: LAN-bound, VPN access.
 - Maintenance: Update quantized models; monitor GPU temps/VRAM.

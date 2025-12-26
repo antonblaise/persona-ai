@@ -1,5 +1,11 @@
 # Folders
 assets/
+.chainlit/
+.files/
+__pycache__/
+public/
 
 # Files
 desktop.ini
+chainlit.md
+.env
