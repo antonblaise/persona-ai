@@ -104,7 +104,7 @@ See `documentation/tech-stack.csv` for the full finalized stack.
 
 ### Stage 3️⃣: Chainlit UI Deployment
 
-In this stage, we will make use of the open-source customizable [Chainlit UI](https://docs.chainlit.io/get-started/overview) to run the AI persona.
+In this stage, we will implement the open-source customizable [Chainlit UI](https://docs.chainlit.io/get-started/overview) to run the AI persona.
 
 1. First, we need to make sure Ollama is running in the background:  
     Open a new Command Prompt or PowerShell and run:
@@ -132,10 +132,16 @@ In this stage, we will make use of the open-source customizable [Chainlit UI](ht
     ```
     This will run Chainlit and open the UI on your browser. It's on the address http://localhost:8000.  
     Notice that it starts up as very basic - just a plain chat, no login page, no side bar with chat histories, and using Chainlit logo everywhere.  
-    Those features can actually be enabled, so no worries.
-    Besides, as Chainlit allows extensive rebranding (as of late December 2025), we can greatly customize this Chainlit UI to fit our AI persona's themes.  
+    Those features will be enabled in the next stage, so no worries!
+    Besides, as Chainlit allows extensive rebranding (as of late December 2025), we will also customize the Chainlit UI to fit our AI persona's themes!  
 
-4. Chainlit Configuration  
+**Stage 3 complete** - you now have a full-featured, ChatGPT-style browser interface connected to your local LLM!
+
+### Stage 4️⃣: Persona & Customization
+
+In this stage, we will enable useful features in Chainlit UI, and also customize the UI to suit our persona's themes.  
+
+1. Chainlit Database and Chat Histories  
     First of all, for chat history and sidebar to be enabled, we need to integrate PostgreSQL to Chainlit.  
 
     - **Create database for the AI**  
@@ -160,8 +166,12 @@ In this stage, we will make use of the open-source customizable [Chainlit UI](ht
         DATABASE_URL=postgresql://postgres:postgres_Password@localhost:5432/persona-ai
         ```
         Now, still in the root directory, run:
-        ```
+        ```cmd
         npx prisma migrate deploy
+        ```
+        (Optional) The database can be viewed and edited in a browser by running this command in the `chainlit-datalayer` root directory:
+        ```cmd
+        npx prisma studio
         ```
     
     - **Setup Chainlit environment in our project**  
@@ -178,52 +188,57 @@ In this stage, we will make use of the open-source customizable [Chainlit UI](ht
         CHAINLIT_AUTH_SECRET="*abcdefghijklmnopqrstuvwxyz!@#$%^&><:?0123456789"
         ```
 
-5. Chainlit setup for `app.py`  
-    Now, we must create a folder named `public` under the root directory.  
-    In that folder, create two files: `users.txt` and `system-prompt.txt` (optional).  
-    - `users.txt`
-        A file to store user credentials in the form of `username,password`.  
-        Fill in the file with the allowed credentials.  
-        Example:
-        ```
-        admin,admin_Password
-        janedoe,jane123doe456
-        ```
-        This file must be present, or the app won't start.  
-        Of course, you can also omit the authentication altogether, but please note that chat histories and side bar **cannot** be enabled without authentication and data layer both implemented.  
+2. Chainlit Environment Configuration for `app.py`  
+    First of all, paste this into your `.env` file:
+    ```
+    # Network & Server Settings
+    CHAINLIT_HOST=0.0.0.0
+    CHAINLIT_PORT=8080
 
-    - `system-prompt.txt`  
-        A system prompt is a prompt fed into the AI to define its details.  
-        This file is optional, as no system prompt simply means to use the AI model as is.
-        Example of system prompt:
-        ```
-        You are {{name}}, a {{age}}-year-old {{gender}} virtual companion.
-        Appearance: {{appearance}}
-        Personality: {{personality}}
-        Birthday: {{birthday}}
+    # Ollama Parallelism Settings
+    OLLAMA_NUM_PARALLEL=5
+    OLLAMA_MAX_LOADED_MODELS=5
 
-        {{other details and backgrounds}}
+    # Hardware Optimization
+    # Setting this to 1 helps reduce VRAM usage on your RTX 4070
+    OLLAMA_FLASH_ATTENTION=1 
 
-        Rules:
-        {{rules joined by newlines}}
+    # Application Paths
+    SYSTEM_PROMPT_PATH=templates/system-prompt.txt
+    USER_JSON_PATH=public/users
+    ```
 
-        Use full conversation history and retrieved memories to stay consistent.
-        You live in {{country}} — always use local cultural accuracy when relevant.
-        ```  
+    `CHAINLIT_HOST`: Host on the LAN IP address.
+    `CHAINLIT_PORT`: The LAN IP port to use.
+    `OLLAMA_NUM_PARALLEL`: How many concurrent users can be processed at once.  
+    `OLLAMA_MAX_LOADED_MODELS`: The number of LLM models Ollama keeps loaded in memory (VRAM/RAM) simultaneously.  
+    `OLLAMA_FLASH_ATTENTION`: Enables Flash Attention, an optimized attention mechanism for transformers that reduces memory usage and improves inference speed on NVIDIA GPUs. Helpful for larger models (e.g., 7-13B) by minimizing VRAM overhead during attention computations.  
+    `system-prompt.txt`: A system prompt is a prompt fed into the AI to define its details. This file is a template file that `app.py` edits and feeds into the AI model.  
+    `public/users`: Folder where each user's system prompt JSON file resides. `app.py` will fall back to just using the Guest profile if this folder doesn't exist.   
 
-        Feel free to modify `app.py` and `system-prompt.txt` as you need.
-    
+    Now, create the `public` folder in the root directory of this project. We'll be using this folder extensively in the upcoming steps.  
+    In the `public` folder, create a folder named `users`.  
+    Copy `templates/users.json` into `public/users`, open and fill in the fields accordingly and rename it to the username of the allowed user. `app.py` generates a unique system prompt of each user based on their JSON file here.   
+    Use `bcrypt-hash.py` generate the password hash (using `bcrypt`) for the account, and copy paste into the `password_hash` field of the user's JSON.
+    ```cmd
+    python bcrypt-hash.py <password in plain text>
+    ```
+    There can be more than one of this JSON files. Each JSON file means each allowed user.  
+    FYI, chat histories are **not** shared among users.  
+    Next, copy `templates/persona.json` into `public/users`. Open and fill in the fields accordingly. This JSON file defines the global settings, configurations and personalities of your persona.  
+    Feel free to modify `app.py` and `templates/system-prompt.txt` as you need.
     ```
     persona-ai/
     ├── public/
-    |   ├── users.txt
-    |   └── system-prompt.txt (optional)
-    └── app.py
+    |   ├── users/
+    |   |   └── <username>.json
+    |   └── persona.json
+    ├── app.py
+    └── bcrypt-hash.py
     ```
 
-    
-6. Chainlit UI Customization  
-    Chainlit offers deep customization of it UI. Here, we will go through some of the basics:  
+3. Chainlit UI Customization  
+    Chainlit offers deep customization of its UI. Here, we will go through some of the basics:  
 
     ```
     persona-ai/
@@ -238,8 +253,10 @@ In this stage, we will make use of the open-source customizable [Chainlit UI](ht
     |   ├── logo_dark.png               <----- Logo used in dark theme
     |   ├── logo_light.png              <----- Logo used in light theme
     |   ├── favicon.png                 <----- Browser tab icon
-    |   ├── system-prompt.txt
-    |   └── users.txt
+    |   ├── users/
+    |   |   └── <username>.json
+    |   └── persona.json
+    ├── .env
     └── chainlit.md                     <----- Readme button content
     ```
 
@@ -262,11 +279,12 @@ In this stage, we will make use of the open-source customizable [Chainlit UI](ht
         ...
         login_page_image = "./public/<login background image file>"
         ```
-        Then, go to `en-US.json` and edit this part to change the browser tab name:
+        Then, go to `en-US.json` and edit this part to change the login page wordings:
         ```
         "auth": {
             "login": {
-                "title": "<browser tab name>",
+                "title": "<welcome message>",
+                "form": {
                 ...
         ```
     
@@ -288,10 +306,10 @@ In this stage, we will make use of the open-source customizable [Chainlit UI](ht
         ```
     
     Feel free to explore and experiment around for more customizations!
-     
-    
+
+_(Pending: Piper TTS voice.)_
+
+**Stage 4 complete** - you now have a fully customizable AI chat frontend UI with multiple LLM models, with a fully configurable AI persona with voice support, who can switch its personalities based on who it's interacting with!
 
 
-**Stage 3 complete** - you now have a full-featured, ChatGPT-style browser interface connected to your local LLM!
 
-### Stage 4️⃣: ...
