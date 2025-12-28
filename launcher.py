@@ -7,9 +7,7 @@ Chainlit application. It is designed to run the Chainlit server headlessly,
 expose a simple tray-based UI, and ensure that only a single instance of the
 launcher is active at any given time.
 
-This script is compiled into an executable ─ launcher.exe using the command:
-
-    pyinstaller --onefile --noconsole --icon=templates\chainlit.ico launcher.py
+This script is compiled into an executable ─ launcher.exe using pyinstaller.
 
 """
 

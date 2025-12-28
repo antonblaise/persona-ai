@@ -92,13 +92,16 @@ See `documentation/tech-stack.csv` for the full finalized stack.
     ```
 
     Type a message and see the response. Exit with `/bye`.  
+
     Feel free to download and test other uncensored LLM models as well from here: https://ollama.com/search?q=uncensored.  
+
     The Dolphin LLM that we pulled is actually not that uncensored. So, here are some examples of uncensored LLM models (as of late Dec 2025) so our AI persona has even more freedom.
     - dolphin-phi
     - HammerAI/llama-3-lexi-uncensored
     - slideshow270/llama-3.1-8b-lexi-uncensored-v2  
     
-    Users can switch freely between downloaded models in Open WebUI. 
+    Feel free to explore and `ollama pull` as many as you like.  
+    Users can switch freely between downloaded models in Chainlit UI. 
 
 **Stage 2 complete** when the model responds successfully.
 
@@ -131,7 +134,9 @@ In this stage, we will implement the open-source customizable [Chainlit UI](http
     chainlit hello
     ```
     This will run Chainlit and open the UI on your browser. It's on the address http://localhost:8000.  
+
     Notice that it starts up as very basic - just a plain chat, no login page, no side bar with chat histories, and using Chainlit logo everywhere.  
+
     Those features will be enabled in the next stage, so no worries!
     Besides, as Chainlit allows extensive rebranding (as of late December 2025), we will also customize the Chainlit UI to fit our AI persona's themes!  
 
@@ -217,15 +222,24 @@ In this stage, we will enable useful features in Chainlit UI, and also customize
     `public/users`: Folder where each user's system prompt JSON file resides. `app.py` will fall back to just using the Guest profile if this folder doesn't exist.   
 
     Now, create the `public` folder in the root directory of this project. We'll be using this folder extensively in the upcoming steps.  
+
     In the `public` folder, create a folder named `users`.  
+
     Copy `templates/users.json` into `public/users`, open and fill in the fields accordingly and rename it to the username of the allowed user. `app.py` generates a unique system prompt of each user based on their JSON file here.   
+
+    **Important note on filling up the users' system prompt JSONs:**  
+    Use 3rd person (he/him/she/her/they/them/this user/...) pronouns to address the user.  
+    Use 2nd person (you/your/...) pronouns to address the persona.
+
     Use `bcrypt-hash.py` generate the password hash (using `bcrypt`) for the account, and copy paste into the `password_hash` field of the user's JSON.
     ```cmd
     python bcrypt-hash.py <password in plain text>
     ```
+
     There can be more than one of this JSON files. Each JSON file means each allowed user.  
     FYI, chat histories are **not** shared among users.  
-    Next, copy `templates/persona.json` into `public/users`. Open and fill in the fields accordingly. This JSON file defines the global settings, configurations and personalities of your persona.  
+
+    Next, copy `templates/persona.json` into `public` folder. Open and fill in the fields accordingly. This JSON file defines the global settings, configurations and personalities of your persona.  
     Feel free to modify `app.py` and `templates/system-prompt.txt` as you need.
     ```
     persona-ai/

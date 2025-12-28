@@ -1,5 +1,6 @@
 import os
 import ollama
+from ollama import AsyncClient
 import bcrypt
 import json
 from datetime import datetime
@@ -8,7 +9,7 @@ from dotenv import load_dotenv
 from typing import Optional
 import chainlit as cl
 from chainlit.types import ThreadDict
-from chainlit.input_widget import Select, Slider, TextInput
+from chainlit.input_widget import Select, Slider, TextInput, Switch
 import chainlit.data.chainlit_data_layer as cl_data
 
 
@@ -34,29 +35,34 @@ async def patched_create_step(self, step_dict):
 
 cl_data.ChainlitDataLayer.create_step = patched_create_step
 
-#       Load the variables from .env
+#       Load the variables from .env. Fallback to the 2nd parameter if failed.
 load_dotenv()
 SYSTEM_PROMPT_PATH = os.getenv("SYSTEM_PROMPT_PATH", "templates/system-prompt.txt")
 USER_JSON_PATH = os.getenv("USER_JSON_PATH", "public/users")
 
 #       Registered users
+USER_JSON_FILES = ['templates/user.json']
 if os.path.isdir(USER_JSON_PATH):
-    USER_JSON_FILES = os.listdir(USER_JSON_PATH) if os.listdir(USER_JSON_PATH) != [] else ['templates/user.json']
+    if os.listdir(USER_JSON_PATH) != []:
+        USER_JSON_FILES = os.listdir(USER_JSON_PATH)
 
 #       Fetch installed Ollama models
 available_models = [model['model'] for model in ollama.list()['models']]
 
 if len(available_models) <= 0:
-    print("No Ollama models found. Please install some via 'ollama pull'.")
+    print("[ERROR] No Ollama models found. Please install some via 'ollama pull'.")
     exit()
 
-DEFAULT_MODEL = "mistral-nemo:latest"
+DEFAULT_MODEL = "deepseek-r1:14b"
 if DEFAULT_MODEL not in available_models:
     DEFAULT_MODEL = available_models[0]
 
 # -------------------------------------------------------- #
 
 # --------------------- Helper functions --------------------- #
+
+def datetimestamp():
+    return str(datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
 
 async def send_settings_to_chainlit():
 
@@ -69,6 +75,11 @@ async def send_settings_to_chainlit():
                 label="Ollama Model",
                 values=available_models,
                 initial_value=DEFAULT_MODEL
+            ),
+            Switch(
+                id="disable_thought_process",
+                label="Disable Thought Process",
+                initial=False
             ),
             Slider(
                 id="temperature",
@@ -140,7 +151,6 @@ def render_system_prompt(template_path: Path, persona_path: Path, user_path: Pat
 
     return system_prompt
 
-
 # ------------------------------------------------------------ #
 
 
@@ -158,13 +168,14 @@ def password_auth_callback(username: str, password: str) -> Optional[cl.User]:
         return None
 
     if username == user_data["username"] and bcrypt.checkpw(password.encode(), user_data["password_hash"].encode()):
-        print(f"{datetime.now().strftime("%Y-%m-%d %H:%M:%S")} - INFO - {username} has logged in.")
+        print(f"{datetimestamp()} - INFO - {username} has logged in.")
         return cl.User(identifier=username, metadata={"role": "user", "provider": "credentials"})
 
     return None
 
 @cl.on_settings_update
 async def on_settings_update(settings):
+
     # Update the session settings
     cl.user_session.set("settings", settings)
     
@@ -176,80 +187,156 @@ async def on_settings_update(settings):
 
 @cl.on_chat_start
 async def on_chat_start():
+
+    # 1. Initialize an empty chat history
     cl.user_session.set("chat_history", [])
+
+    # 2. Build the system prompt ONCE per chat session
+    system_prompt = render_system_prompt(
+        Path("templates/system-prompt.txt"),
+        Path("public/persona.json"),
+        Path(f"public/users/{cl.user_session.get("user").identifier}.json")
+    )
+
+    # Store system prompt so it is reused on every turn
+    cl.user_session.set("system_prompt", system_prompt)
+
+    # Send UI settings (model, temp, etc.)
     await send_settings_to_chainlit()
 
 @cl.on_message
 async def on_message(message: cl.Message):
-    # 1. Get settings and history
+
+    # Get settings, history, and system prompt
     settings = cl.user_session.get("settings")
     selected_model = settings["ollama_model"]
-    history = cl.user_session.get("chat_history")
+    history = cl.user_session.get("chat_history", [])
+    system_prompt = cl.user_session.get("system_prompt", "")
 
-    # 2. Add the user's new message to the history
+    # message =
+    # system_prompt
+    #   +
+    # history
+    #   +
+    # user's message
     history.append({"role": "user", "content": message.content})
-    
-    # 3. Build the full message list for Ollama
-    # We include the System Prompt at the very beginning
-    messages = [
-        {
-            "role": "system",
-            "content": render_system_prompt(
-                Path("templates/system-prompt.txt"),
-                Path("public/persona.json"),
-                Path(f"public/users/{message.author}.json")
+    messages = [{"role": "system", "content": system_prompt}] + history
+
+    # Stream using AsyncClient (removes the need for cl.make_async)
+    # This returns a true asynchronous iterator
+    client = AsyncClient()
+    disable_thought_process = settings.get("disable_thought_process", False)
+
+    try:
+        if disable_thought_process:
+            stream = await client.chat(
+                model=selected_model,
+                messages=messages,
+                stream=True,
+                think=False,
+                options={
+                    "temperature": settings["temperature"],
+                    "top_p": settings["top_p"],
+                    "num_ctx": int(settings["num_ctx"]),
+                    "num_gpu": -1
+                }
             )
-        }
-    ] + history
+        else:
+            stream = await client.chat(
+                model=selected_model,
+                messages=messages,
+                stream=True,
+                options={
+                    "temperature": settings["temperature"],
+                    "top_p": settings["top_p"],
+                    "num_ctx": int(settings["num_ctx"]),
+                    "num_gpu": -1
+                }
+            )
 
-    msg = cl.Message(content="")
-    
-    # 4. Stream the response using the full history
-    stream = await cl.make_async(ollama.chat)(
-        model=selected_model,
-        messages=messages,
-        stream=True,
-        options={
-            "temperature": settings["temperature"],
-            "top_p": settings["top_p"],
-            "num_ctx": int(settings["num_ctx"]),
-            "num_gpu": 999
-        }
-    )
+        # Initialize variables
+        full_response = ""
+        msg = cl.Message(content="💭")
+        await msg.send()
 
-    full_response = ""
-    for chunk in stream:
-        token = chunk['message']['content']
-        full_response += token
-        await msg.stream_token(token)
+        thinking_step = None
+        first_content = True
 
-    # 5. Add the AI's response to history so it's remembered next time
-    history.append({"role": "assistant", "content": full_response})
-    cl.user_session.set("chat_history", history)
+        async for chunk in stream:
 
-    await msg.send()
+            # Use default empty strings to avoid 'NoneType' errors
+            thinking_token = chunk['message'].get('thinking', "")
+            content_token = chunk['message'].get('content', "")
+
+            # Build responses safely
+            full_response += (thinking_token or "") + (content_token or "")
+
+            # If there's thinking outputs
+            if thinking_token and not disable_thought_process:
+                # Create the thinking Step if not created yet
+                if thinking_step == None:
+                    thinking_step = cl.Step(name="Thought Process", type="llm", )
+                    thinking_step.content = ""
+                    await thinking_step.send()
+            
+                await thinking_step.stream_token(thinking_token)
+
+            # Stream the actual response content
+            if content_token:
+                if first_content:
+                    msg.content = content_token
+                    await msg.update()
+                    first_content = False
+                else:
+                    await msg.stream_token(content_token)
+
+        await msg.update()
+
+        # Update chat history
+        history.append({"role": "assistant", "content": full_response})
+        cl.user_session.set("chat_history", history)
+
+        # --- Debug ---
+        print(f"""
+------------------------------- {datetimestamp()} -------------------------------
+
+[{cl.user_session.get("user").identifier}]:
+
+{message.content}
+
+[{selected_model}]:
+
+{full_response}
+
+---------------------------------------------------------------------------------
+""")
+    except Exception as e:
+        error_msg = cl.Message(content=f"⚠️ `{str(e)}`")
+        await error_msg.send()
+        print(f"{datetimestamp()} - ERROR - {str(e)}")
 
 @cl.on_chat_resume
 async def on_chat_resume(thread: ThreadDict):
 
+    # Reset chat history
     cl.user_session.set("chat_history", [])
     await send_settings_to_chainlit()
 
-    # Loop through all previous messages in the chat thread to rebuild context
+    # Rebuild history from previous thread steps
+    history = cl.user_session.get("chat_history")
     for message in thread["steps"]:
         if message["type"] == "user_message":
-            cl.user_session.get("chat_history").append(
-                {"role": "user", "content": message["output"]}
-            )
+            history.append({"role": "user", "content": message["output"]})
         elif message["type"] == "assistant_message":
-            cl.user_session.get("chat_history").append(
-                {"role": "assistant", "content": message["output"]}
-            )
+            history.append({"role": "assistant", "content": message["output"]})
+
+    cl.user_session.set("chat_history", history)
 
 @cl.on_chat_end
 async def on_chat_end():
 
     try:
         await cl.context.emitter.emit("clear", {})
-    except Exception:
+    except Exception as e:
+        print(f"{datetimestamp()} - INFO - cl.on_chat_end hit Exception: {e}")
         pass
