@@ -1,15 +1,26 @@
+# ==================== System & Environment ====================
 import os
+from pathlib import Path
+from datetime import datetime
+from dotenv import load_dotenv
+
+# ==================== Core AI & Inference ====================
 import ollama
 from ollama import AsyncClient
-import bcrypt
+
+# ==================== Utilities ====================
 import json
-from datetime import datetime
-from pathlib import Path
-from dotenv import load_dotenv
+import bcrypt
+
+# ==================== Typing ====================
 from typing import Optional
+
+# ==================== Chainlit Framework ====================
 import chainlit as cl
 from chainlit.types import ThreadDict
 from chainlit.input_widget import Select, Slider, TextInput, Switch
+
+# ==================== Chainlit Data Layer (optional/custom) ====================
 import chainlit.data.chainlit_data_layer as cl_data
 
 
@@ -46,14 +57,14 @@ if os.path.isdir(USER_JSON_PATH):
     if os.listdir(USER_JSON_PATH) != []:
         USER_JSON_FILES = os.listdir(USER_JSON_PATH)
 
-#       Fetch installed Ollama models
+#       Fetch installed Ollama and set a default model
 available_models = [model['model'] for model in ollama.list()['models']]
 
 if len(available_models) <= 0:
     print("[ERROR] No Ollama models found. Please install some via 'ollama pull'.")
     exit()
 
-DEFAULT_MODEL = "deepseek-r1:14b"
+DEFAULT_MODEL = "deepseek-r1:8b"
 if DEFAULT_MODEL not in available_models:
     DEFAULT_MODEL = available_models[0]
 
@@ -99,8 +110,8 @@ async def send_settings_to_chainlit():
             ),
             TextInput(
                 id="num_ctx",
-                label="Context Length",
-                initial="32768"
+                label="Context Length (k)",
+                initial="32"
             )
         ]
     ).send()
@@ -213,12 +224,7 @@ async def on_message(message: cl.Message):
     history = cl.user_session.get("chat_history", [])
     system_prompt = cl.user_session.get("system_prompt", "")
 
-    # llm_input =
-    # system_prompt
-    #       +
-    # chat history
-    #       +
-    # user's message
+    # Build input: system prompt + full history + current user message
     history.append({"role": "user", "content": message.content})
     llm_input = [{"role": "system", "content": system_prompt}] + history
 
@@ -236,7 +242,7 @@ async def on_message(message: cl.Message):
                 options={
                     "temperature": settings["temperature"],
                     "top_p": settings["top_p"],
-                    "num_ctx": int(settings["num_ctx"]),
+                    "num_ctx": int(settings["num_ctx"]) * 1024,
                     "num_gpu": -1
                 }
             )
@@ -248,7 +254,7 @@ async def on_message(message: cl.Message):
                 options={
                     "temperature": settings["temperature"],
                     "top_p": settings["top_p"],
-                    "num_ctx": int(settings["num_ctx"]),
+                    "num_ctx": int(settings["num_ctx"]) * 1024,
                     "num_gpu": -1
                 }
             )
@@ -260,7 +266,6 @@ async def on_message(message: cl.Message):
         await msg.send()
 
         thinking_step = None
-        first_content = True
 
         async for chunk in stream:
 
@@ -268,7 +273,7 @@ async def on_message(message: cl.Message):
             thinking_token = chunk['message'].get('thinking', "")
             content_token = chunk['message'].get('content', "")
 
-            # Accumulate thinking if present
+            # Handle thinking tokens
             if thinking_token and not disable_thought_process:
                 thinking_content += thinking_token
                 
@@ -280,24 +285,26 @@ async def on_message(message: cl.Message):
                 
                 await thinking_step.stream_token(thinking_token)
 
-            # Stream the actual response content
+            # Handle actual response content
             if content_token:
                 response_content += content_token
-                
-                if first_content:
-                    msg.content = content_token
-                    await msg.update()
-                    first_content = False
-                else:
-                    await msg.stream_token(content_token)
 
+        # ======================== Finalize all content ======================== #
+        
+        # 1. Update the main message with FULL response content
+        msg.content = response_content
         await msg.update()
+        
+        # 2. Update thinking step with FULL thinking content
+        if thinking_step is not None:
+            thinking_step.output = thinking_content
+            await thinking_step.update()
 
-        # Update chat history with combined response
+        # 3. Save to session history
         history.append(
             {
                 "role": "assistant",
-                "content": f"<think>\n{thinking_content}\n</think>\n\n{response_content}"
+                "content": f"{thinking_content}\n\n{response_content}" if thinking_content else response_content
             }
         )
         cl.user_session.set("chat_history", history)
@@ -312,25 +319,51 @@ async def on_message(message: cl.Message):
 @cl.on_chat_resume
 async def on_chat_resume(thread: ThreadDict):
 
-    # Indicate the switched model name the chat
-    await cl.Message(
-        content=f"✨ `{cl.user_session.get("settings")['ollama_model']}`",
-        author="System"
-    ).send()
-
     # Send UI settings (model, temp, etc.)
     await send_settings_to_chainlit()
+
+    # Indicate the switched model name the chat
+    await cl.Message(
+        content=f"✨ `{cl.user_session.get('settings')['ollama_model']}`",
+        author="System"
+    ).send()
 
     # Reset chat history
     cl.user_session.set("chat_history", [])
 
-    # Rebuild history from previous thread stepsz
-    history = cl.user_session.get("chat_history")
-    for message in thread["steps"]:
-        if message["type"] == "user_message":
-            history.append({"role": "user", "content": message["output"]})
-        elif message["type"] == "assistant_message":
-            history.append({"role": "assistant", "content": message["output"]})
+    # Rebuild history from previous thread steps
+    history = []
+    steps = thread.get("steps", [])
+    
+    # First, map thinking steps to their parent messages
+    thinking_by_parent = {}
+    
+    for step in steps:
+        if step.get("type") == "step" and step.get("name") == "Thought Process":
+            parent_id = step.get("parentId")
+            if parent_id:
+                thinking_by_parent[parent_id] = step.get("output", step.get("content", ""))
+    
+    # Now reconstruct the conversation
+    for step in steps:
+        step_type = step.get("type")
+        
+        if step_type == "user_message":
+            history.append({"role": "user", "content": step.get("output", "")})
+            
+        elif step_type == "assistant_message":
+            step_id = step.get("id")
+            thinking_content = thinking_by_parent.get(step_id, "")
+            response_content = step.get("output", "")
+            
+            if thinking_content and response_content:
+                full_content = f"{thinking_content}\n\n{response_content}"
+            elif response_content:
+                full_content = response_content
+            else:
+                continue  # Skip empty messages
+                
+            history.append({"role": "assistant", "content": full_content})
 
     cl.user_session.set("chat_history", history)
 

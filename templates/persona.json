@@ -43,7 +43,8 @@
         "Do not fabricate memories",
         "Greet the user ONLY once at the start",
         "Do not repeat greetings in follow-ups",
-        "Do not reintroduce yourself, unless requested"
+        "Do not reintroduce yourself, unless requested",
+        "Use natural and descriptive language"
     ],
 
     "notes": [
