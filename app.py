@@ -179,7 +179,7 @@ async def on_settings_update(settings):
     # Update the session settings
     cl.user_session.set("settings", settings)
     
-    # Send a small, formatted notification to the chat
+    # Indicate the switched model name the chat
     await cl.Message(
         content=f"✨ `{settings['ollama_model']}`",
         author="System"
@@ -213,17 +213,16 @@ async def on_message(message: cl.Message):
     history = cl.user_session.get("chat_history", [])
     system_prompt = cl.user_session.get("system_prompt", "")
 
-    # message =
+    # llm_input =
     # system_prompt
-    #   +
-    # history
-    #   +
+    #       +
+    # chat history
+    #       +
     # user's message
     history.append({"role": "user", "content": message.content})
-    messages = [{"role": "system", "content": system_prompt}] + history
+    llm_input = [{"role": "system", "content": system_prompt}] + history
 
-    # Stream using AsyncClient (removes the need for cl.make_async)
-    # This returns a true asynchronous iterator
+    # Stream using AsyncClient
     client = AsyncClient()
     disable_thought_process = settings.get("disable_thought_process", False)
 
@@ -231,7 +230,7 @@ async def on_message(message: cl.Message):
         if disable_thought_process:
             stream = await client.chat(
                 model=selected_model,
-                messages=messages,
+                messages=llm_input,
                 stream=True,
                 think=False,
                 options={
@@ -244,7 +243,7 @@ async def on_message(message: cl.Message):
         else:
             stream = await client.chat(
                 model=selected_model,
-                messages=messages,
+                messages=llm_input,
                 stream=True,
                 options={
                     "temperature": settings["temperature"],
@@ -255,7 +254,8 @@ async def on_message(message: cl.Message):
             )
 
         # Initialize variables
-        full_response = ""
+        response_content = ""
+        thinking_content = ""  # Track thinking separately
         msg = cl.Message(content="💭")
         await msg.send()
 
@@ -268,21 +268,22 @@ async def on_message(message: cl.Message):
             thinking_token = chunk['message'].get('thinking', "")
             content_token = chunk['message'].get('content', "")
 
-            # Build responses safely
-            full_response += (thinking_token or "") + (content_token or "")
-
-            # If there's thinking outputs
+            # Accumulate thinking if present
             if thinking_token and not disable_thought_process:
+                thinking_content += thinking_token
+                
                 # Create the thinking Step if not created yet
-                if thinking_step == None:
-                    thinking_step = cl.Step(name="Thought Process", type="llm", )
+                if thinking_step is None:
+                    thinking_step = cl.Step(name="Thought Process")
                     thinking_step.content = ""
                     await thinking_step.send()
-            
+                
                 await thinking_step.stream_token(thinking_token)
 
             # Stream the actual response content
             if content_token:
+                response_content += content_token
+                
                 if first_content:
                     msg.content = content_token
                     await msg.update()
@@ -292,37 +293,38 @@ async def on_message(message: cl.Message):
 
         await msg.update()
 
-        # Update chat history
-        history.append({"role": "assistant", "content": full_response})
+        # Update chat history with combined response
+        history.append(
+            {
+                "role": "assistant",
+                "content": f"<think>\n{thinking_content}\n</think>\n\n{response_content}"
+            }
+        )
         cl.user_session.set("chat_history", history)
 
-        # --- Debug ---
-        print(f"""
-------------------------------- {datetimestamp()} -------------------------------
-
-[{cl.user_session.get("user").identifier}]:
-
-{message.content}
-
-[{selected_model}]:
-
-{full_response}
-
----------------------------------------------------------------------------------
-""")
     except Exception as e:
-        error_msg = cl.Message(content=f"⚠️ `{str(e)}`")
-        await error_msg.send()
+        await cl.Message(
+            content=f"⚠️ `{str(e)}`",
+            author="System"
+        ).send()
         print(f"{datetimestamp()} - ERROR - {str(e)}")
 
 @cl.on_chat_resume
 async def on_chat_resume(thread: ThreadDict):
 
-    # Reset chat history
-    cl.user_session.set("chat_history", [])
+    # Indicate the switched model name the chat
+    await cl.Message(
+        content=f"✨ `{cl.user_session.get("settings")['ollama_model']}`",
+        author="System"
+    ).send()
+
+    # Send UI settings (model, temp, etc.)
     await send_settings_to_chainlit()
 
-    # Rebuild history from previous thread steps
+    # Reset chat history
+    cl.user_session.set("chat_history", [])
+
+    # Rebuild history from previous thread stepsz
     history = cl.user_session.get("chat_history")
     for message in thread["steps"]:
         if message["type"] == "user_message":
