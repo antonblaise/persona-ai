@@ -58,66 +58,25 @@ if os.path.isdir(USER_JSON_PATH):
         USER_JSON_FILES = os.listdir(USER_JSON_PATH)
 
 #       Fetch installed Ollama and set a default model
-available_models = [model['model'] for model in ollama.list()['models']]
+AVAILABLE_MODELS = [model['model'] for model in ollama.list()['models']]
 
-if len(available_models) <= 0:
+if len(AVAILABLE_MODELS) <= 0:
     print("[ERROR] No Ollama models found. Please install some via 'ollama pull'.")
     exit()
 
 DEFAULT_MODEL = "deepseek-r1:8b"
-if DEFAULT_MODEL not in available_models:
-    DEFAULT_MODEL = available_models[0]
+if DEFAULT_MODEL not in AVAILABLE_MODELS:
+    DEFAULT_MODEL = AVAILABLE_MODELS[0]
 
 # -------------------------------------------------------- #
 
 # --------------------- Helper functions --------------------- #
 
-def datetimestamp():
+def datetimestamp() -> str:
     return str(datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
 
-async def send_settings_to_chainlit():
-
-    # Tells Chainlit: “Hey, use these settings right now in the chat.”
-    # In other words: Apply the chat settings so they take effect.
-    settings = await cl.ChatSettings(
-        [
-            Select(
-                id="ollama_model",
-                label="Ollama Model",
-                values=available_models,
-                initial_value=DEFAULT_MODEL
-            ),
-            Switch(
-                id="disable_thought_process",
-                label="Disable Thought Process",
-                initial=False
-            ),
-            Slider(
-                id="temperature",
-                label="Temperature",
-                min=0.0,
-                max=1.5,
-                step=0.1,
-                initial=0.7
-            ),
-            Slider(
-                id="top_p",
-                label="Top P",
-                min=0.1,
-                max=1.0,
-                step=0.05,
-                initial=0.9
-            ),
-            TextInput(
-                id="num_ctx",
-                label="Context Length (k)",
-                initial="32"
-            )
-        ]
-    ).send()
-
-    # Remember these settings for the current user while they’re using the chat.
-    cl.user_session.set("settings", settings)
+def double_each_step(first_number: int, number_of_steps: int) -> list[str]:
+    return [str(first_number * (2 ** i)) for i in range(number_of_steps + 1)]
 
 def flatten_json(d, parent_key="", sep="."):
 
@@ -161,6 +120,56 @@ def render_system_prompt(template_path: Path, persona_path: Path, user_path: Pat
         system_prompt = system_prompt.replace(f"{{{{{key}}}}}", val)
 
     return system_prompt
+
+async def send_settings_to_chainlit():
+
+    # Tells Chainlit: “Hey, use these settings right now in the chat.”
+    # In other words: Apply the chat settings so they take effect.
+    settings = await cl.ChatSettings(
+        [
+            Select(
+                id="ollama_model",
+                label="Ollama Model",
+                values=AVAILABLE_MODELS,
+                initial_value=DEFAULT_MODEL
+            ),
+            Switch(
+                id="stream_response",
+                label="Stream Response",
+                initial=True
+            ),
+            Switch(
+                id="disable_thought_process",
+                label="Disable Thought Process",
+                initial=False
+            ),
+            Slider(
+                id="temperature",
+                label="Temperature",
+                min=0.0,
+                max=1.5,
+                step=0.1,
+                initial=0.7
+            ),
+            Slider(
+                id="top_p",
+                label="Top P",
+                min=0.1,
+                max=1.0,
+                step=0.05,
+                initial=0.9
+            ),
+            Select(
+                id="num_ctx",
+                label="Context Length (k)",
+                values=double_each_step(4, 6),
+                initial_value="64",
+            )
+        ]
+    ).send()
+
+    # Remember these settings for the current user while they’re using the chat.
+    cl.user_session.set("settings", settings)
 
 # ------------------------------------------------------------ #
 
@@ -266,6 +275,7 @@ async def on_message(message: cl.Message):
         await msg.send()
 
         thinking_step = None
+        first_content = True
 
         async for chunk in stream:
 
@@ -288,19 +298,27 @@ async def on_message(message: cl.Message):
             # Handle actual response content
             if content_token:
                 response_content += content_token
+                
+                #  Stream it as it comes if streaming is enabled
+                if settings["stream_response"]:
+                    if first_content:
+                        msg.content = content_token
+                        await msg.update()
+                        first_content = False
+                    else:
+                        await msg.stream_token(content_token)
+                # Otherwise, update the main message with FULL response content
+                else:
+                    msg.content = response_content
 
-        # ======================== Finalize all content ======================== #
-        
-        # 1. Update the main message with FULL response content
-        msg.content = response_content
         await msg.update()
         
-        # 2. Update thinking step with FULL thinking content
+        # Update thinking step with FULL thinking content
         if thinking_step is not None:
             thinking_step.output = thinking_content
             await thinking_step.update()
 
-        # 3. Save to session history
+        # Save to session history
         history.append(
             {
                 "role": "assistant",
