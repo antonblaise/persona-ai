@@ -4,6 +4,7 @@ assets/
 .files/
 __pycache__/
 public/
+storage/
 
 # Files
 desktop.ini

@@ -1,0 +1,24 @@
+# Core Chainlit and web framework
+chainlit>=1.1.0
+
+# Ollama client
+ollama>=0.3.0
+
+# TTS (Coqui XTTS-v2 for voice cloning)
+TTS>=0.22.0
+
+# Required pinned version for XTTS compatibility
+transformers==4.36.2
+
+# Utilities
+requests>=2.31.0
+bcrypt>=4.0.1
+python-dotenv>=1.0.0
+
+# Required for Chainlit persistence
+asyncpg>=0.29.0
+
+# Remove emoji from responses to generate clean audio
+emoji>=2.15.0
+
+# Note: torch, torchvision, torchaudio are installed separately with CUDA support

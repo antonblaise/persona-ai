@@ -19,7 +19,7 @@ You clone it, run the setup, and mold your companion from scratch: give it a nam
 **Tech Stack Summary**  
 See `documentation/tech-stack.csv` for the full finalized stack.
 
-## Quick Start (Windows 11 + NVIDIA GPU)
+## Setup Guide (Windows 11 + NVIDIA GPU)
 
 ### 📋 Prerequisites
 - Windows 11
@@ -321,9 +321,31 @@ In this stage, we will enable useful features in Chainlit UI, and also customize
     
     Feel free to explore and experiment around for more customizations!
 
-_(Pending: Piper TTS voice.)_
+4. Enable XTTS Voice for Responses  
+    Create a folder named `voice` in `public` folder. Put the voice sample for your persona into the folder as `persona.wav`.  
 
-**Stage 4 complete** - you now have a fully customizable AI chat frontend UI with multiple LLM models, with a fully configurable AI persona with voice support, who can switch its personalities based on who it's interacting with!
+    ```
+    persona-ai/
+    └── public/
+        └── voice/
+            └── persona.wav
+    ```
+
+**Stage 4 complete** - you now have a fully customizable AI chat frontend UI with multiple LLM models, with a fully configurable AI persona with voice support, who can switch its personalities depending on who it's interacting with!
+
+### Stage 5️⃣: Image generation
+
+1. Install ComfyUI  
+    Go to this link, download and install ComfyUI: https://www.comfy.org/download  
+    After installed, launch it for further setups.
+    
 
 
+## Quick Start
 
+```cmd
+conda create -n persona-ai python=3.11 -y
+conda activate persona-ai
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+pip install -r requirements.txt
+```

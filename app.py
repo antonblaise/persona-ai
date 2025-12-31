@@ -1,3 +1,5 @@
+print("Importing libraries ...")
+
 # ==================== System & Environment ====================
 import os
 from pathlib import Path
@@ -7,10 +9,13 @@ from dotenv import load_dotenv
 # ==================== Core AI & Inference ====================
 import ollama
 from ollama import AsyncClient
+import torch
+from TTS.api import TTS
 
 # ==================== Utilities ====================
 import json
 import bcrypt
+import emoji
 
 # ==================== Typing ====================
 from typing import Optional
@@ -18,13 +23,15 @@ from typing import Optional
 # ==================== Chainlit Framework ====================
 import chainlit as cl
 from chainlit.types import ThreadDict
-from chainlit.input_widget import Select, Slider, TextInput, Switch
+from chainlit.input_widget import Select, Slider, Switch
 
 # ==================== Chainlit Data Layer (optional/custom) ====================
 import chainlit.data.chainlit_data_layer as cl_data
 
 
-# --------------------- Global setup --------------------- #
+# --------------------- Global Setup --------------------- #
+
+print("Doing global setup ...")
 
 # --- FIX: Chainlit Datetime Bug Workaround ---
 # We redefine the ISO_FORMAT to match what your system is actually producing.
@@ -50,6 +57,8 @@ cl_data.ChainlitDataLayer.create_step = patched_create_step
 load_dotenv()
 SYSTEM_PROMPT_PATH = os.getenv("SYSTEM_PROMPT_PATH", "templates/system-prompt.txt")
 USER_JSON_PATH = os.getenv("USER_JSON_PATH", "public/users")
+VOICE_SAMPLE_PATH = os.getenv("VOICE_SAMPLE_PATH", "")
+RESPONSE_AUDIO_PATH = os.getenv("RESPONSE_AUDIO_PATH", "storage/audio")
 
 #       Registered users
 USER_JSON_FILES = ['templates/user.json']
@@ -67,6 +76,26 @@ if len(AVAILABLE_MODELS) <= 0:
 DEFAULT_MODEL = "deepseek-r1:8b"
 if DEFAULT_MODEL not in AVAILABLE_MODELS:
     DEFAULT_MODEL = AVAILABLE_MODELS[0]
+
+#       Global XTTS instance (loaded once)
+XTTS_MODEL = None
+
+if os.path.isfile(VOICE_SAMPLE_PATH):
+
+    try:
+        XTTS_MODEL = TTS("tts_models/multilingual/multi-dataset/xtts_v2")
+        if torch.cuda.is_available():
+            XTTS_MODEL.to(device="cuda")
+            print("INFO - XTTS-v2 loaded successfully with GPU.")
+        else:
+            XTTS_MODEL.to(device="cpu")
+            print("INFO - XTTS-v2 loaded with CPU.")
+
+    except Exception as e:
+        print(f"ERROR - XTTS failed to load: {e}. Falling back to text-only.")
+
+else:
+    print(f"WARNING - Voice sample '{VOICE_SAMPLE_PATH}' not found. Voice disabled.")
 
 # -------------------------------------------------------- #
 
@@ -132,6 +161,11 @@ async def send_settings_to_chainlit():
                 label="Ollama Model",
                 values=AVAILABLE_MODELS,
                 initial_value=DEFAULT_MODEL
+            ),
+            Switch(
+                id="autoplay_audio",
+                label="Auto Play Audio",
+                initial=False
             ),
             Switch(
                 id="stream_response",
@@ -208,14 +242,17 @@ async def on_settings_update(settings):
 @cl.on_chat_start
 async def on_chat_start():
 
-    # 1. Initialize an empty chat history
+    # Set the XTTS model
+    cl.user_session.set("XTTS_MODEL", XTTS_MODEL)
+
+    # Initialize an empty chat history
     cl.user_session.set("chat_history", [])
 
-    # 2. Build the system prompt ONCE per chat session
+    # Build the system prompt ONCE per chat session
     system_prompt = render_system_prompt(
         Path("templates/system-prompt.txt"),
         Path("public/persona.json"),
-        Path(f"public/users/{cl.user_session.get("user").identifier}.json")
+        Path(f"public/users/{cl.user_session.get('user').identifier}.json")
     )
 
     # Store system prompt so it is reused on every turn
@@ -252,7 +289,7 @@ async def on_message(message: cl.Message):
                     "temperature": settings["temperature"],
                     "top_p": settings["top_p"],
                     "num_ctx": int(settings["num_ctx"]) * 1024,
-                    "num_gpu": -1
+                    "num_gpu": 999
                 }
             )
         else:
@@ -264,7 +301,7 @@ async def on_message(message: cl.Message):
                     "temperature": settings["temperature"],
                     "top_p": settings["top_p"],
                     "num_ctx": int(settings["num_ctx"]) * 1024,
-                    "num_gpu": -1
+                    "num_gpu": 999
                 }
             )
 
@@ -310,19 +347,40 @@ async def on_message(message: cl.Message):
                 # Otherwise, update the main message with FULL response content
                 else:
                     msg.content = response_content
-
-        await msg.update()
         
         # Update thinking step with FULL thinking content
         if thinking_step is not None:
             thinking_step.output = thinking_content
             await thinking_step.update()
+        # Enable TTS voice button with XTTS Voice Cloning
+        if XTTS_MODEL and response_content.strip():
+            try:
+                response_audio = f"{RESPONSE_AUDIO_PATH}/{datetime.now().timestamp()}.wav"
+                XTTS_MODEL.tts_to_file(
+                    text=emoji.replace_emoji(response_content, replace="").strip(),
+                    speaker_wav=VOICE_SAMPLE_PATH,
+                    language="en",
+                    file_path=response_audio
+                )
+                audio_element = cl.Audio(
+                    path=response_audio,
+                    name="Response", mime="audio/wav",
+                    display="inline",
+                    auto_play=settings["autoplay_audio"]
+                )
+                msg.elements.append(audio_element)
+            except Exception as e:
+                print(f"{datetimestamp()} - ERROR - TTS generation failed: {e}")
+
+        # Update the message with the final content
+        await msg.update()
 
         # Save to session history
         history.append(
             {
                 "role": "assistant",
-                "content": f"{thinking_content}\n\n{response_content}" if thinking_content else response_content
+                "content": f"{thinking_content}\n\n{response_content}" if thinking_content else response_content,
+                "elements": msg.elements 
             }
         )
         cl.user_session.set("chat_history", history)
@@ -336,6 +394,9 @@ async def on_message(message: cl.Message):
 
 @cl.on_chat_resume
 async def on_chat_resume(thread: ThreadDict):
+
+    # Set the XTTS model
+    cl.user_session.set("XTTS_MODEL", XTTS_MODEL)
 
     # Send UI settings (model, temp, etc.)
     await send_settings_to_chainlit()
