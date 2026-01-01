@@ -24,7 +24,4 @@ asyncpg>=0.29.0
 # Remove emoji from responses to generate clean audio
 emoji>=2.15.0
 
-# Needed to create DB connection pool
-psycopg2>=2.9.11
-
 # Note: torch, torchvision, torchaudio are installed separately with CUDA support

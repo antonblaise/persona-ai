@@ -262,7 +262,7 @@ async def on_message(message: cl.Message):
                 },
             )
         ]
-        print(f"Debug - {msg.id}")
+        print(f"\nResponse message ID - {msg.id}\n")
 
         # Update the message with the final content
         await msg.update()
@@ -393,8 +393,14 @@ async def generate_audio_for_step(action: cl.Action):
         response_text = response_text.replace(instance, " ")
 
     # Ask the selected LLM model to describe the flow of emotions in the full response using 3 English adjectives.
-    emotions = await emotion_in_one_adjective(text=full_response, llm_model=llm_model)
-    print(f"Emotions of LLM response: {emotions}")
+    emotions = await describe_emotions(text=full_response, llm_model=llm_model)
+    print(f"\nEmotions of LLM response: {emotions}\n")
+
+    # Detect the response's language
+    supported_languages = ['en', 'es', 'fr', 'de', 'it', 'pt', 'pl', 'tr', 'ru', 'nl', 'cs', 'ar', 'zh-cn', 'hu', 'ko', 'ja', 'hi']
+    language_detected = detect(response_text)
+    language_used = language_detected if language_detected in supported_languages else "en"
+    print(f"\nMost probable language of LLM response: {language_detected}. Language to be used by TTS: {language_used}\n")
 
     # Create user's folder in storage/audio if not exist yet
     audio_folder_of_user = f"{RESPONSE_AUDIO_PATH}/{username}"
@@ -402,24 +408,29 @@ async def generate_audio_for_step(action: cl.Action):
 
     # Enable TTS voice button with XTTS Voice Cloning
     if XTTS_MODEL and response_text:
-        # try:
-        response_audio = f"{audio_folder_of_user}/{username}_{datetimestamp(no_space=True)}.wav"
-        XTTS_MODEL.tts_to_file(
-            text=emoji.replace_emoji(response_text.strip(), replace="").strip(),
-            speaker_wav=VOICE_SAMPLE_PATH,
-            language=detect(response_text),
-            file_path=response_audio,
-            emotion="Soft, cute and sensual. " + emotions
-        )
-        audio_element = cl.Audio(
-            path=response_audio,
-            name="", 
-            mime="audio/wav",
-            display="inline",
-        )
-        
-        message = cl.Message(id=message_id, content=full_response)
-        message.elements.append(audio_element)
-        await message.update()
-        # except Exception as e:
-        #     print(f"{datetimestamp()} - ERROR - TTS generation failed: {e}")
+        try:
+            response_audio = f"{audio_folder_of_user}/{username}_{datetimestamp(no_space=True)}.wav"
+            XTTS_MODEL.tts_to_file(
+                text=emoji.replace_emoji(response_text.strip(), replace="").strip(),
+                speaker_wav=VOICE_SAMPLE_PATH,
+                language=language_used,
+                file_path=response_audio,
+                emotion=emotions
+            )
+            audio_element = cl.Audio(
+                path=response_audio,
+                name="", 
+                mime="audio/wav",
+                display="inline",
+            )
+            
+            message = cl.Message(id=message_id, content=full_response)
+            message.elements.append(audio_element)
+            await message.update()
+        except Exception as e:
+            await cl.Message(
+                content=f"⚠️ `{str(e)}`",
+                author="System",
+                type="system_message"
+            ).send()
+            print(f"{datetimestamp()} - ERROR - TTS generation failed: {e}")

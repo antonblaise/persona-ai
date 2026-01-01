@@ -12,11 +12,11 @@ def datetimestamp(no_space=False) -> str:
 def double_each_step(first_number: int, number_of_steps: int) -> list[str]:
     return [str(first_number * (2 ** i)) for i in range(number_of_steps + 1)]
 
-async def emotion_in_one_adjective(text: str, llm_model: str) -> str:
+async def describe_emotions(text: str, llm_model: str) -> str:
 
     client = AsyncClient()
 
-    llm_input = f"Represent the flow of emotions in the given text with only 2 to 3 English adjective words. Don't explain, don't elaborate just answer directly in English.\n\n{text.strip()}"
+    llm_input = f"In less than 20 English words, accurately describe the emotions conveyed through this given text:\n\n{text.strip()}"
 
     response = await client.chat(
         model=llm_model,
