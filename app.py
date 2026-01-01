@@ -280,7 +280,8 @@ async def on_message(message: cl.Message):
     except Exception as e:
         await cl.Message(
             content=f"⚠️ `{str(e)}`",
-            author="System"
+            author="System",
+            type="system_message"
         ).send()
         print(f"{datetimestamp()} - ERROR - {str(e)}")
 
