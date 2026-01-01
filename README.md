@@ -348,4 +348,5 @@ conda create -n persona-ai python=3.11 -y
 conda activate persona-ai
 pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
 pip install -r requirements.txt
+launcher.bat
 ```

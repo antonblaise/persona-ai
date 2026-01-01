@@ -3,7 +3,6 @@ print("Importing libraries ...")
 # ==================== System & Environment ====================
 import os
 from pathlib import Path
-from datetime import datetime
 from dotenv import load_dotenv
 
 # ==================== Core AI & Inference ====================
@@ -16,6 +15,8 @@ from TTS.api import TTS
 import json
 import bcrypt
 import emoji
+import re
+from langdetect import detect
 
 # ==================== Typing ====================
 from typing import Optional
@@ -23,11 +24,12 @@ from typing import Optional
 # ==================== Chainlit Framework ====================
 import chainlit as cl
 from chainlit.types import ThreadDict
-from chainlit.input_widget import Select, Slider, Switch
 
 # ==================== Chainlit Data Layer (optional/custom) ====================
 import chainlit.data.chainlit_data_layer as cl_data
 
+# ==================== Custom functions ====================
+from lib.helper_functions import *
 
 # --------------------- Global Setup --------------------- #
 
@@ -86,126 +88,19 @@ if os.path.isfile(VOICE_SAMPLE_PATH):
         XTTS_MODEL = TTS("tts_models/multilingual/multi-dataset/xtts_v2")
         if torch.cuda.is_available():
             XTTS_MODEL.to(device="cuda")
-            print("INFO - XTTS-v2 loaded successfully with GPU.")
+            print("INFO - TTS model loaded successfully with GPU.")
         else:
             XTTS_MODEL.to(device="cpu")
-            print("INFO - XTTS-v2 loaded with CPU.")
+            print("INFO - TTS model loaded with CPU.")
 
     except Exception as e:
-        print(f"ERROR - XTTS failed to load: {e}. Falling back to text-only.")
+        print(f"ERROR - TTS model failed to load: {e}. Falling back to text-only.")
 
 else:
     print(f"WARNING - Voice sample '{VOICE_SAMPLE_PATH}' not found. Voice disabled.")
 
 # -------------------------------------------------------- #
 
-# --------------------- Helper functions --------------------- #
-
-def datetimestamp() -> str:
-    return str(datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
-
-def double_each_step(first_number: int, number_of_steps: int) -> list[str]:
-    return [str(first_number * (2 ** i)) for i in range(number_of_steps + 1)]
-
-def flatten_json(d, parent_key="", sep="."):
-
-    """
-    Flatten nested JSON into dot notation keys.
-    Example: {"a": {"b": 1}} => {"a.b": 1}
-    """
-    items = {}
-    for k, v in d.items():
-        new_key = f"{parent_key}{sep}{k}" if parent_key else k
-        if isinstance(v, dict):
-            items.update(flatten_json(v, new_key, sep=sep))
-        elif isinstance(v, list):
-            # Convert lists to comma-separated strings
-            items[new_key] = ", ".join(map(str, v)) if v else ""
-        else:
-            items[new_key] = v
-    return items
-
-def render_system_prompt(template_path: Path, persona_path: Path, user_path: Path) -> str:
-
-    # Load template and JSONs
-    template = template_path.read_text(encoding="utf-8")
-    persona = json.loads(persona_path.read_text(encoding="utf-8"))
-    user = json.loads(user_path.read_text(encoding="utf-8"))
-
-    # Flatten JSONs
-    flat_persona = flatten_json(persona)
-    flat_user = flatten_json(user)
-
-    # Prepare placeholder dictionary
-    placeholders = {}
-    for key, val in flat_persona.items():
-        placeholders[f"persona.{key}"] = str(val)
-    for key, val in flat_user.items():
-        placeholders[f"user.{key}"] = str(val)
-
-    # Replace placeholders in template
-    system_prompt = template
-    for key, val in placeholders.items():
-        system_prompt = system_prompt.replace(f"{{{{{key}}}}}", val)
-
-    return system_prompt
-
-async def send_settings_to_chainlit():
-
-    # Tells Chainlit: “Hey, use these settings right now in the chat.”
-    # In other words: Apply the chat settings so they take effect.
-    settings = await cl.ChatSettings(
-        [
-            Select(
-                id="ollama_model",
-                label="Ollama Model",
-                values=AVAILABLE_MODELS,
-                initial_value=DEFAULT_MODEL
-            ),
-            Switch(
-                id="autoplay_audio",
-                label="Auto Play Audio",
-                initial=False
-            ),
-            Switch(
-                id="stream_response",
-                label="Stream Response",
-                initial=True
-            ),
-            Switch(
-                id="disable_thought_process",
-                label="Disable Thought Process",
-                initial=False
-            ),
-            Slider(
-                id="temperature",
-                label="Temperature",
-                min=0.0,
-                max=1.5,
-                step=0.1,
-                initial=0.7
-            ),
-            Slider(
-                id="top_p",
-                label="Top P",
-                min=0.1,
-                max=1.0,
-                step=0.05,
-                initial=0.9
-            ),
-            Select(
-                id="num_ctx",
-                label="Context Length (k)",
-                values=double_each_step(4, 6),
-                initial_value="64",
-            )
-        ]
-    ).send()
-
-    # Remember these settings for the current user while they’re using the chat.
-    cl.user_session.set("settings", settings)
-
-# ------------------------------------------------------------ #
 
 
 @cl.password_auth_callback
@@ -232,12 +127,8 @@ async def on_settings_update(settings):
 
     # Update the session settings
     cl.user_session.set("settings", settings)
-    
-    # Indicate the switched model name the chat
-    await cl.Message(
-        content=f"✨ `{settings['ollama_model']}`",
-        author="System"
-    ).send()
+    print(f"on_settings_update - {cl.user_session.get('settings')}")
+
 
 @cl.on_chat_start
 async def on_chat_start():
@@ -258,8 +149,10 @@ async def on_chat_start():
     # Store system prompt so it is reused on every turn
     cl.user_session.set("system_prompt", system_prompt)
 
-    # Send UI settings (model, temp, etc.)
-    await send_settings_to_chainlit()
+    # Enable settings UI (model, temp, etc.) with the initial settings
+    await send_chainlit_settings(available_models=AVAILABLE_MODELS, default_model=DEFAULT_MODEL, saved_settings=None)
+    print(f"on_chat_start - {cl.user_session.get('settings')}")
+
 
 @cl.on_message
 async def on_message(message: cl.Message):
@@ -269,6 +162,10 @@ async def on_message(message: cl.Message):
     selected_model = settings["ollama_model"]
     history = cl.user_session.get("chat_history", [])
     system_prompt = cl.user_session.get("system_prompt", "")
+
+    # Enable settings UI (model, temp, etc.) and inherit the old 
+    await send_chainlit_settings(available_models=AVAILABLE_MODELS, default_model=DEFAULT_MODEL, saved_settings=settings)
+    print(f"on_message - {cl.user_session.get('settings')}")
 
     # Build input: system prompt + full history + current user message
     history.append({"role": "user", "content": message.content})
@@ -326,7 +223,7 @@ async def on_message(message: cl.Message):
                 
                 # Create the thinking Step if not created yet
                 if thinking_step is None:
-                    thinking_step = cl.Step(name="Thought Process")
+                    thinking_step = cl.Step(name="Thought Process", type="llm")
                     thinking_step.content = ""
                     await thinking_step.send()
                 
@@ -352,25 +249,20 @@ async def on_message(message: cl.Message):
         if thinking_step is not None:
             thinking_step.output = thinking_content
             await thinking_step.update()
-        # Enable TTS voice button with XTTS Voice Cloning
-        if XTTS_MODEL and response_content.strip():
-            try:
-                response_audio = f"{RESPONSE_AUDIO_PATH}/{datetime.now().timestamp()}.wav"
-                XTTS_MODEL.tts_to_file(
-                    text=emoji.replace_emoji(response_content, replace="").strip(),
-                    speaker_wav=VOICE_SAMPLE_PATH,
-                    language="en",
-                    file_path=response_audio
-                )
-                audio_element = cl.Audio(
-                    path=response_audio,
-                    name="Response", mime="audio/wav",
-                    display="inline",
-                    auto_play=settings["autoplay_audio"]
-                )
-                msg.elements.append(audio_element)
-            except Exception as e:
-                print(f"{datetimestamp()} - ERROR - TTS generation failed: {e}")
+
+        # Add audio button to response
+        msg.actions = [
+            cl.Action(
+                name="tts_button",
+                icon="speaker",
+                payload={
+                    "message_content": msg.content,
+                    "message_id": msg.id,
+                    "llm_model": selected_model,
+                },
+            )
+        ]
+        print(f"Debug - {msg.id}")
 
         # Update the message with the final content
         await msg.update()
@@ -380,7 +272,7 @@ async def on_message(message: cl.Message):
             {
                 "role": "assistant",
                 "content": f"{thinking_content}\n\n{response_content}" if thinking_content else response_content,
-                "elements": msg.elements 
+                "actions": msg.actions 
             }
         )
         cl.user_session.set("chat_history", history)
@@ -395,17 +287,13 @@ async def on_message(message: cl.Message):
 @cl.on_chat_resume
 async def on_chat_resume(thread: ThreadDict):
 
+    # Enable settings UI (model, temp, etc.) and inherit the old settings
+    await send_chainlit_settings(available_models=AVAILABLE_MODELS, default_model=DEFAULT_MODEL, saved_settings=cl.user_session.get('settings'))
+    settings = cl.user_session.get('settings')
+    selected_model = settings["ollama_model"]
+
     # Set the XTTS model
     cl.user_session.set("XTTS_MODEL", XTTS_MODEL)
-
-    # Send UI settings (model, temp, etc.)
-    await send_settings_to_chainlit()
-
-    # Indicate the switched model name the chat
-    await cl.Message(
-        content=f"✨ `{cl.user_session.get('settings')['ollama_model']}`",
-        author="System"
-    ).send()
 
     # Reset chat history
     cl.user_session.set("chat_history", [])
@@ -435,14 +323,37 @@ async def on_chat_resume(thread: ThreadDict):
             thinking_content = thinking_by_parent.get(step_id, "")
             response_content = step.get("output", "")
             
-            if thinking_content and response_content:
-                full_content = f"{thinking_content}\n\n{response_content}"
-            elif response_content:
-                full_content = response_content
-            else:
+            if not response_content:
                 continue  # Skip empty messages
                 
-            history.append({"role": "assistant", "content": full_content})
+            full_content = f"{thinking_content}\n\n{response_content}" if thinking_content else response_content
+            
+            history.append(
+                {
+                    "role": "assistant",
+                    "content": full_content,
+                }
+            )
+
+            # === FIX: Re-add the TTS speaker button to the persisted message ===
+            await cl.Message(
+                id=step_id,
+                content=response_content,  # Use the original output (without thinking prefix)
+                actions=[
+                    cl.Action(
+                        name="tts_button",
+                        icon="speaker",
+                        payload={
+                            "message_content": response_content,
+                            "message_id": step_id,
+                            "llm_model": selected_model
+                        },
+                    )
+                ]
+            ).send()
+
+        else:
+            pass
 
     cl.user_session.set("chat_history", history)
 
@@ -454,3 +365,61 @@ async def on_chat_end():
     except Exception as e:
         print(f"{datetimestamp()} - INFO - cl.on_chat_end hit Exception: {e}")
         pass
+
+@cl.action_callback("tts_button")
+async def generate_audio_for_step(action: cl.Action):
+
+    # Initialize variables
+    full_response = action.payload.get("message_content")
+    message_id = action.payload.get("message_id")
+    username = cl.user_session.get('user').identifier
+    llm_model = action.payload.get("llm_model")
+
+    # Filter response - real text only (remove emojis and wrapped texts, like (text) and *text*)
+    response_text = full_response
+    descriptions = re.compile(r"(?:\(|（|\*)\S(?:.*?\S)?(?:\)|）|\*)")
+    missing_periods = re.compile(r"[a-z]+ {2,}", re.IGNORECASE)
+    excess_blank_spaces = re.compile(r" {2,}|\n")
+
+    response_text = emoji.replace_emoji(response_text, replace="").strip()
+
+    for instance in re.findall(descriptions, response_text):
+        response_text = response_text.replace(instance, "")
+
+    for instance in re.findall(missing_periods, response_text):
+        response_text = response_text.replace(instance, instance.replace("  ", ". "))
+
+    for instance in re.findall(excess_blank_spaces, response_text):
+        response_text = response_text.replace(instance, " ")
+
+    # Ask the selected LLM model to describe the flow of emotions in the full response using 3 English adjectives.
+    emotions = await emotion_in_one_adjective(text=full_response, llm_model=llm_model)
+    print(f"Emotions of LLM response: {emotions}")
+
+    # Create user's folder in storage/audio if not exist yet
+    audio_folder_of_user = f"{RESPONSE_AUDIO_PATH}/{username}"
+    os.mkdir(audio_folder_of_user) if not os.path.isdir(audio_folder_of_user) else None  
+
+    # Enable TTS voice button with XTTS Voice Cloning
+    if XTTS_MODEL and response_text:
+        # try:
+        response_audio = f"{audio_folder_of_user}/{username}_{datetimestamp(no_space=True)}.wav"
+        XTTS_MODEL.tts_to_file(
+            text=emoji.replace_emoji(response_text.strip(), replace="").strip(),
+            speaker_wav=VOICE_SAMPLE_PATH,
+            language=detect(response_text),
+            file_path=response_audio,
+            emotion="Soft, cute and sensual. " + emotions
+        )
+        audio_element = cl.Audio(
+            path=response_audio,
+            name="", 
+            mime="audio/wav",
+            display="inline",
+        )
+        
+        message = cl.Message(id=message_id, content=full_response)
+        message.elements.append(audio_element)
+        await message.update()
+        # except Exception as e:
+        #     print(f"{datetimestamp()} - ERROR - TTS generation failed: {e}")

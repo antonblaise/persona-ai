@@ -7,6 +7,9 @@ ollama>=0.3.0
 # TTS (Coqui XTTS-v2 for voice cloning)
 TTS>=0.22.0
 
+# Language detection for TTS
+langdetect>=1.0.9
+
 # Required pinned version for XTTS compatibility
 transformers==4.36.2
 
@@ -20,5 +23,8 @@ asyncpg>=0.29.0
 
 # Remove emoji from responses to generate clean audio
 emoji>=2.15.0
+
+# Needed to create DB connection pool
+psycopg2>=2.9.11
 
 # Note: torch, torchvision, torchaudio are installed separately with CUDA support

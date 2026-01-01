@@ -1,7 +1,7 @@
 {
     "identity": {
         "name": "",
-        "age": 0,
+        "age": "",
         "gender": "",
         "birthday": "",
         "nationality": "",
@@ -11,8 +11,8 @@
 
     "appearance": {
         "build": "",
-        "height_cm": 0,
-        "weight_kg": 0,
+        "height_cm": "",
+        "weight_kg": "",
         "eyes": "",
         "hair": "",
         "presence": "",
