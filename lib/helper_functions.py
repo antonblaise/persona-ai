@@ -88,7 +88,7 @@ def purify_string(input_string: str) -> str:
     for instance in excess_blank_spaces:
         output_string = output_string.replace(instance, "" if "\n" in instance else " ")
 
-    return output_string
+    return output_string.strip()
 
 
 # ---------------------------------------------------- Async functions ---------------------------------------------------- #

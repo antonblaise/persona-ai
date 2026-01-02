@@ -343,10 +343,17 @@ In this stage, we will enable useful features in Chainlit UI, and also customize
 
 ## Quick Start
 
+Run these commands in the root directory of this project ─ `persona-ai/`
+
 ```cmd
 conda create -n persona-ai python=3.11 -y
 conda activate persona-ai
-pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/<cu***>
 pip install -r requirements.txt
+hf download fishaudio/openaudio-s1-mini --local-dir public/fishaudio/models/openaudio-s1-mini
+docker run -d --name fish-speech -p 8081:7860 --gpus all -v "%CD%\public\fishaudio\models":/app/checkpoints -e BACKEND=cuda -e COMPILE=1 fishaudio/fish-speech:latest
 launcher.bat
 ```
+`<cu***>`: Find out the correct version for your GPU. For example, RTX 4070 uses 'cu121'.
+
+

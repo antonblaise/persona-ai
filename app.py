@@ -8,13 +8,14 @@ from dotenv import load_dotenv
 # ==================== Core AI & Inference ====================
 import ollama
 from ollama import AsyncClient
-import torch
-from TTS.api import TTS
+
+# ==================== TTS ====================
+from gradio_client import Client, handle_file
 
 # ==================== Utilities ====================
 import json
 import bcrypt
-import emoji
+import requests
 import shutil
 from langdetect import detect
 
@@ -59,7 +60,7 @@ cl_data.ChainlitDataLayer.create_step = patched_create_step
 load_dotenv()
 SYSTEM_PROMPT_PATH = os.getenv("SYSTEM_PROMPT_PATH", "templates/system-prompt.txt")
 USER_JSON_PATH = os.getenv("USER_JSON_PATH", "public/users")
-VOICE_SAMPLE_PATH = os.getenv("VOICE_SAMPLE_PATH", "")
+VOICE_SAMPLE_PATH = os.getenv("VOICE_SAMPLE_PATH", None)
 RESPONSE_AUDIO_PATH = os.getenv("RESPONSE_AUDIO_PATH", "storage/audio")
 
 #       Registered users
@@ -79,28 +80,7 @@ DEFAULT_MODEL = "deepseek-r1:8b"
 if DEFAULT_MODEL not in AVAILABLE_MODELS:
     DEFAULT_MODEL = AVAILABLE_MODELS[0]
 
-#       Global XTTS instance (loaded once)
-XTTS_MODEL = None
-
-if os.path.isfile(VOICE_SAMPLE_PATH):
-
-    try:
-        XTTS_MODEL = TTS("tts_models/multilingual/multi-dataset/xtts_v2")
-        if torch.cuda.is_available():
-            XTTS_MODEL.to(device="cuda")
-            print("INFO - TTS model loaded successfully with GPU.")
-        else:
-            XTTS_MODEL.to(device="cpu")
-            print("INFO - TTS model loaded with CPU.")
-
-    except Exception as e:
-        print(f"ERROR - TTS model failed to load: {e}. Falling back to text-only.")
-
-else:
-    print(f"WARNING - Voice sample '{VOICE_SAMPLE_PATH}' not found. Voice disabled.")
-
 # -------------------------------------------------------- #
-
 
 
 @cl.password_auth_callback
@@ -127,16 +107,13 @@ async def on_settings_update(settings):
 
     # Update the session settings
     cl.user_session.set("settings", settings)
-    print(f"on_settings_update - {cl.user_session.get('settings')}")
+    print(f"\non_settings_update\n{json.dumps(cl.user_session.get('settings'), indent=4)}\n")
 
 
 @cl.on_chat_start
 async def on_chat_start():
 
-    # Set the XTTS model
-    cl.user_session.set("XTTS_MODEL", XTTS_MODEL)
-
-    # Initialize an empty chat history
+    # Initialize an empty chat space
     cl.user_session.set("chat_history", [])
 
     # Build the system prompt ONCE per chat session
@@ -151,7 +128,7 @@ async def on_chat_start():
 
     # Enable settings UI (model, temp, etc.) with the initial settings
     await send_chainlit_settings(available_models=AVAILABLE_MODELS, default_model=DEFAULT_MODEL, saved_settings=None)
-    print(f"on_chat_start - {cl.user_session.get('settings')}")
+    print(f"\non_chat_start\n{json.dumps(cl.user_session.get('settings'), indent=4)}\n")
 
 
 @cl.on_message
@@ -165,7 +142,7 @@ async def on_message(message: cl.Message):
 
     # Enable settings UI (model, temp, etc.) and inherit the old 
     await send_chainlit_settings(available_models=AVAILABLE_MODELS, default_model=DEFAULT_MODEL, saved_settings=settings)
-    print(f"on_message - {cl.user_session.get('settings')}")
+    print(f"\non_message\n{json.dumps(cl.user_session.get('settings'), indent=4)}\n")
 
     # Build input: system prompt + full history + current user message
     history.append({"role": "user", "content": message.content})
@@ -243,6 +220,9 @@ async def on_message(message: cl.Message):
                         await msg.stream_token(content_token)
                 # Otherwise, update the main message with FULL response content
                 else:
+                    if "</think>" in response_content:
+                        print(f"\n{datetimestamp()} - INFO - '</think>' tag found in the response.\n")
+                        response_content = response_content.split("</think>")[1]
                     msg.content = response_content
         
         # Update thinking step with FULL thinking content
@@ -288,13 +268,10 @@ async def on_message(message: cl.Message):
 @cl.on_chat_resume
 async def on_chat_resume(thread: ThreadDict):
 
+    print(f"\non_chat_resume\n- Thread ID: {thread['id']}\n{json.dumps(cl.user_session.get('settings'), indent=4)}\n")
+
     # Enable settings UI (model, temp, etc.) and inherit the old settings
     await send_chainlit_settings(available_models=AVAILABLE_MODELS, default_model=DEFAULT_MODEL, saved_settings=cl.user_session.get('settings'))
-    settings = cl.user_session.get('settings')
-    selected_model = settings["ollama_model"]
-
-    # Set the XTTS model
-    cl.user_session.set("XTTS_MODEL", XTTS_MODEL)
 
     # Reset chat history
     cl.user_session.set("chat_history", [])
@@ -302,7 +279,10 @@ async def on_chat_resume(thread: ThreadDict):
     # Rebuild history from previous thread steps
     history = []
     steps = thread.get("steps", [])
-    
+
+    # Clear all elements to avoid unnecassary empty spaces
+    thread['elements'] = []
+
     # First, map thinking steps to their parent messages
     thinking_by_parent = {}
     
@@ -336,22 +316,24 @@ async def on_chat_resume(thread: ThreadDict):
                 }
             )
 
-            # === FIX: Re-add the TTS speaker button to the persisted message ===
-            await cl.Message(
+            # Re-add the TTS speaker button to the persisted message ===
+            message = cl.Message(
                 id=step_id,
-                content=response_content,  # Use the original output (without thinking prefix)
+                content=response_content,   # Use the original output (without thinking prefix)
                 actions=[
                     cl.Action(
                         name="tts_button",
                         icon="speaker",
                         payload={
                             "message_content": response_content,
-                            "message_id": step_id,
-                            "llm_model": selected_model
+                            "message_id": step_id
                         },
                     )
                 ]
-            ).send()
+            )
+
+            await message.send()
+
 
         else:
             pass
@@ -377,51 +359,87 @@ async def on_chat_end():
 @cl.action_callback("tts_button")
 async def generate_audio_for_step(action: cl.Action):
 
+    # Get voice sample
+    if os.path.isfile(VOICE_SAMPLE_PATH):
+        print(f"\n\n{'-'*50}\n\nFish Audio will use '{VOICE_SAMPLE_PATH}' as the sample audio.\n\n")
+        voice_sample = handle_file(fr"{VOICE_SAMPLE_PATH}")
+    else:
+        warning_message = f"\n\n{'-'*50}\n\nNo voice sample given. Fish Audio will use a random voice.\n\n"
+        print(warning_message)
+        await cl.Message(
+            content=f"⚠️ `{warning_message}`",
+            author="System",
+            type="system_message"
+        ).send()
+        voice_sample = None
+
     # Initialize variables
     full_response = action.payload.get("message_content")
     message_id = action.payload.get("message_id")
     username = cl.user_session.get('user').identifier
-    llm_model = action.payload.get("llm_model")
 
     # Filter response - real text only (remove emojis and wrapped texts, like (text) and *text*)
     response_text = purify_string(input_string=full_response)
 
+    # If there's no words, just skip audio generation
+    if response_text == "":
+        await cl.Message(
+            content=f"⚠️ `The response has no words.`",
+            author="System",
+            type="system_message"
+        ).send()
+        print(f"{datetimestamp()} - The response has no words.")
+
+        return None
+
     # Ask the selected LLM model to describe the flow of emotions in the full response using 3 English adjectives.
-    emotions = await describe_emotions(text=full_response, llm_model=llm_model)
-    print(f"\nEmotions of LLM response: {emotions}\n")
 
     # Detect the response's language
-    supported_languages = ['en', 'es', 'fr', 'de', 'it', 'pt', 'pl', 'tr', 'ru', 'nl', 'cs', 'ar', 'zh-cn', 'hu', 'ko', 'ja', 'hi']
     language_detected = detect(response_text*200)       # Duplicate text for more accurate detection
-    language_used = language_detected if language_detected in supported_languages else "en"     # Fall back to English if language detected is not available
-    print(f"\nMost probable language of LLM response: {language_detected}. Language to be used by TTS: {language_used}\n")
+    print(f"\nMost probable language of LLM response: {language_detected}.\n")
 
     # Create user's folder in storage/audio if not exist yet
     audio_folder_of_user = f"{RESPONSE_AUDIO_PATH}/{username}"
     os.mkdir(audio_folder_of_user) if not os.path.isdir(audio_folder_of_user) else None  
 
-    # Enable TTS voice button with XTTS Voice Cloning
-    if XTTS_MODEL and response_text:
+    # ------- Enable TTS voice button with Voice Cloning - fishaudio/fish-speech -------
+    client = Client("http://localhost:8081")
+
+    if response_text:
         try:
             audio_filename = f"{username}_{datetimestamp(no_space=True)}.wav"
-            response_audio = f"{audio_folder_of_user}/{audio_filename}"
-            XTTS_MODEL.tts_to_file(
+            audio_output_file = f"{audio_folder_of_user}/{audio_filename}"
+
+            # Generate audio .wav file
+            response_audio = client.predict(
                 text=response_text,
-                speaker_wav=VOICE_SAMPLE_PATH,
-                language=language_used,
-                file_path=response_audio,
-                emotion=emotions
+                reference_id="",
+                reference_audio=voice_sample,
+                max_new_tokens=0,
+                chunk_length=400,
+                top_p=0.8,
+                repetition_penalty=1.1,
+                temperature=0.8,
+                seed=0,
+                use_memory_cache="on",
+                api_name="/partial"
             )
-            audio_element = cl.Audio(
-                path=response_audio,
-                name=f"Response audio in language: {language_used}"                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             , 
+
+            # Cut and paste into user's audio folder
+            shutil.move(response_audio[0], audio_output_file)
+
+            # Create Chainlit audio element
+            audio_action = cl.Audio(
+                path=audio_output_file,
+                name="🔊",
                 mime="audio/wav",
                 display="inline",
             )
-            
+
+            # Point to the message and append the audio element into it.
             message = cl.Message(id=message_id, content=full_response)
-            message.elements.append(audio_element)
-            await message.update()
+            message.actions.append(audio_action)
+            await message.send()
         except Exception as e:
             await cl.Message(
                 content=f"⚠️ `{str(e)}`",

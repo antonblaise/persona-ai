@@ -10,6 +10,9 @@ TTS>=0.22.0
 # Language detection for TTS
 langdetect>=1.0.9
 
+# Hugging Face CLI to download XTTS models 
+huggingface-hub>=0.36.0
+
 # Required pinned version for XTTS compatibility
 transformers==4.36.2
 
@@ -23,5 +26,8 @@ asyncpg>=0.29.0
 
 # Remove emoji from responses to generate clean audio
 emoji>=2.15.0
+
+# Gradio client for Fish Speech TTS
+gradio_client>=2.0.2
 
 # Note: torch, torchvision, torchaudio are installed separately with CUDA support
