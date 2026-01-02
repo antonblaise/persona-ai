@@ -73,8 +73,8 @@ def purify_string(input_string: str) -> str:
     # Parentheses - English and Chinese - ( )（ ）
     # Asterisks - *
     # ... no white spaces after the first and before the second. e.g.: *text*, (text)
-    descriptions = re.findall(re.compile(r"(?:\(|（|\*)\S(?:.*?\S)?(?:\)|）|\*)"), output_string)
-    wrapped_text = re.findall(re.compile(r"(?:\(|（|\*)(\S.*?\S)?(?:\)|）|\*)"), output_string)
+    descriptions = re.findall(re.compile(r"(?:（|\*)\S(?:.*?\S)?(?:）|\*)"), output_string)
+    wrapped_text = re.findall(re.compile(r"(?:（|\*)(\S.*?\S)?(?:）|\*)"), output_string)
     for i in range(len(descriptions)):
         output_string = output_string.replace(descriptions[i], f"{wrapped_text[i]}.")
 

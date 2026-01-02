@@ -15,9 +15,7 @@ from gradio_client import Client, handle_file
 # ==================== Utilities ====================
 import json
 import bcrypt
-import requests
 import shutil
-from langdetect import detect
 
 # ==================== Typing ====================
 from typing import Optional
@@ -58,6 +56,7 @@ cl_data.ChainlitDataLayer.create_step = patched_create_step
 
 #       Load the variables from .env. Fallback to the 2nd parameter if failed.
 load_dotenv()
+DATABASE_URL = os.getenv("DATABASE_URL", "")
 SYSTEM_PROMPT_PATH = os.getenv("SYSTEM_PROMPT_PATH", "templates/system-prompt.txt")
 USER_JSON_PATH = os.getenv("USER_JSON_PATH", "public/users")
 VOICE_SAMPLE_PATH = os.getenv("VOICE_SAMPLE_PATH", None)
@@ -129,7 +128,6 @@ async def on_chat_start():
     # Enable settings UI (model, temp, etc.) with the initial settings
     await send_chainlit_settings(available_models=AVAILABLE_MODELS, default_model=DEFAULT_MODEL, saved_settings=None)
     print(f"\non_chat_start\n{json.dumps(cl.user_session.get('settings'), indent=4)}\n")
-
 
 @cl.on_message
 async def on_message(message: cl.Message):
@@ -392,12 +390,6 @@ async def generate_audio_for_step(action: cl.Action):
 
         return None
 
-    # Ask the selected LLM model to describe the flow of emotions in the full response using 3 English adjectives.
-
-    # Detect the response's language
-    language_detected = detect(response_text*200)       # Duplicate text for more accurate detection
-    print(f"\nMost probable language of LLM response: {language_detected}.\n")
-
     # Create user's folder in storage/audio if not exist yet
     audio_folder_of_user = f"{RESPONSE_AUDIO_PATH}/{username}"
     os.mkdir(audio_folder_of_user) if not os.path.isdir(audio_folder_of_user) else None  
@@ -426,6 +418,7 @@ async def generate_audio_for_step(action: cl.Action):
             )
 
             # Cut and paste into user's audio folder
+            print(response_audio[0])
             shutil.move(response_audio[0], audio_output_file)
 
             # Create Chainlit audio element
@@ -437,8 +430,8 @@ async def generate_audio_for_step(action: cl.Action):
             )
 
             # Point to the message and append the audio element into it.
-            message = cl.Message(id=message_id, content=full_response)
-            message.actions.append(audio_action)
+            message = cl.Message(id=message_id, content=full_response, elements=[audio_action])
+            # message.actions.append(audio_action)
             await message.send()
         except Exception as e:
             await cl.Message(

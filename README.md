@@ -347,7 +347,8 @@ Run these commands in the root directory of this project ─ `persona-ai/`
 
 ```cmd
 conda create -n persona-ai python=3.11 -y
-conda activate persona-ai
+conda activate persona-
+conda install -c conda-forge ffmpeg
 pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/<cu***>
 pip install -r requirements.txt
 hf download fishaudio/openaudio-s1-mini --local-dir public/fishaudio/models/openaudio-s1-mini

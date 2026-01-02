@@ -27,7 +27,7 @@ asyncpg>=0.29.0
 # Remove emoji from responses to generate clean audio
 emoji>=2.15.0
 
-# Gradio client for Fish Speech TTS
+# For TTS
 gradio_client>=2.0.2
 
 # For launcher.py showing an icon in system tray
