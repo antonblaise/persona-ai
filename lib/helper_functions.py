@@ -1,4 +1,6 @@
 import json
+import re
+import emoji
 from datetime import datetime
 from pathlib import Path
 import chainlit as cl
@@ -10,40 +12,16 @@ def datetimestamp(no_space=False) -> str:
     return str(datetime.now().strftime("%Y%m%d_%H%M%S_%f")) if no_space else str(datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
 
 def double_each_step(first_number: int, number_of_steps: int) -> list[str]:
+
+    # Return a list of doubling numbers, starting from first_number.
+    # e.g.: 1, 2, 4, 8, 16, 32, 64, ... for number_of_steps
     return [str(first_number * (2 ** i)) for i in range(number_of_steps + 1)]
-
-async def describe_emotions(text: str, llm_model: str) -> str:
-
-    client = AsyncClient()
-
-    llm_input = f"In less than 20 English words, accurately describe the emotions conveyed through this given text:\n\n{text.strip()}"
-
-    response = await client.chat(
-        model=llm_model,
-        messages=[
-            {
-                "role": "user",
-                "content": llm_input
-            }
-        ],        
-        stream=False,
-        think=False,
-        options={
-            "temperature": 0.7,
-            "top_p": 0.9,
-            "num_ctx": 8 * 1024,
-            "num_gpu": 999
-        }
-    )
-
-    return str(response['message']['content'].strip().lower())
 
 def flatten_json(d, parent_key="", sep="."):
 
-    """
-    Flatten nested JSON into dot notation keys.
-    Example: {"a": {"b": 1}} => {"a.b": 1}
-    """
+    # Flatten nested JSON into dot notation keys.
+    # Example: {"a": {"b": 1}} => {"a.b": 1}
+    
     items = {}
     for k, v in d.items():
         new_key = f"{parent_key}{sep}{k}" if parent_key else k
@@ -57,6 +35,8 @@ def flatten_json(d, parent_key="", sep="."):
     return items
 
 def render_system_prompt(template_path: Path, persona_path: Path, user_path: Path) -> str:
+
+    # Generate the full system prompt using user's JSON file and the template system-prompt.txt.
 
     # Load template and JSONs
     template = template_path.read_text(encoding="utf-8")
@@ -81,10 +61,44 @@ def render_system_prompt(template_path: Path, persona_path: Path, user_path: Pat
 
     return system_prompt.replace(r"{{datetime}}", datetime.now().strftime("%A, %Y-%m-%d %H:%M:%S"))
 
+def purify_string(input_string: str) -> str:
+
+    # Filter a text filled emojis, new lines, special characters, etc, into one single line of sentences.
+
+    output_string = input_string
+
+    # Remove emojis
+    output_string = emoji.replace_emoji(output_string, replace="").strip()
+
+    # Parentheses - English and Chinese - ( )（ ）
+    # Asterisks - *
+    # ... no white spaces after the first and before the second. e.g.: *text*, (text)
+    descriptions = re.findall(re.compile(r"(?:\(|（|\*)\S(?:.*?\S)?(?:\)|）|\*)"), output_string)
+    wrapped_text = re.findall(re.compile(r"(?:\(|（|\*)(\S.*?\S)?(?:\)|）|\*)"), output_string)
+    for i in range(len(descriptions)):
+        output_string = output_string.replace(descriptions[i], f"{wrapped_text[i]}.")
+
+    # Missing periods/full stops
+    missing_periods = re.findall(re.compile(r"[a-z]+ {2,}", re.IGNORECASE), output_string)
+    for instance in missing_periods:
+        output_string = output_string.replace(instance, f"{instance.strip()}. ")
+
+    # Exsessive blank spaces like "\n" and "  "
+    excess_blank_spaces = re.findall(re.compile(r" {2,}|\n"), output_string)
+    for instance in excess_blank_spaces:
+        output_string = output_string.replace(instance, "" if "\n" in instance else " ")
+
+    return output_string
+
+
+# ---------------------------------------------------- Async functions ---------------------------------------------------- #
+
+
 async def send_chainlit_settings(available_models: list, default_model: str, saved_settings: dict | None):
 
     # Tells Chainlit: “Hey, use these settings right now in the chat.”
     # In other words: Apply the chat settings so they take effect.
+    # This enables the settings widget in chat.
     settings = await cl.ChatSettings(
         [
             Select(
@@ -123,11 +137,35 @@ async def send_chainlit_settings(available_models: list, default_model: str, sav
                 id="num_ctx",
                 label="Context Length (k)",
                 values=double_each_step(4, 6),
-                initial_value=saved_settings["num_ctx"] if saved_settings is not None else "64",
+                initial_value=saved_settings["num_ctx"] if saved_settings is not None else "128",
             )
         ]
     ).send()
 
     cl.user_session.set("settings", settings)
 
+async def describe_emotions(text: str, llm_model: str) -> str:
 
+    client = AsyncClient()
+
+    llm_input = f"In less than 20 English words, accurately describe the emotions conveyed through this given text:\n\n{text.strip()}"
+
+    response = await client.chat(
+        model=llm_model,
+        messages=[
+            {
+                "role": "user",
+                "content": llm_input
+            }
+        ],        
+        stream=False,
+        think=False,
+        options={
+            "temperature": 0.7,
+            "top_p": 0.9,
+            "num_ctx": 8 * 1024,
+            "num_gpu": 999
+        }
+    )
+
+    return str(response['message']['content'].strip().lower())

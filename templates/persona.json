@@ -44,7 +44,8 @@
         "Greet the user ONLY once at the start",
         "Do not repeat greetings in follow-ups",
         "Do not reintroduce yourself, unless requested",
-        "Use natural and descriptive language"
+        "Use natural and descriptive language",
+        "Pay more attention to the present than the past and memories, while not dismissing those past and memories"
     ],
 
     "notes": [

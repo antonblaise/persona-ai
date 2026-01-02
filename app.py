@@ -15,7 +15,7 @@ from TTS.api import TTS
 import json
 import bcrypt
 import emoji
-import re
+import shutil
 from langdetect import detect
 
 # ==================== Typing ====================
@@ -362,6 +362,13 @@ async def on_chat_resume(thread: ThreadDict):
 async def on_chat_end():
 
     try:
+        username = cl.user_session.get("user").identifier
+
+        # Delete generated media files of the user
+        user_audio_files_path = f"{RESPONSE_AUDIO_PATH}/{username}"
+        if os.path.isdir(user_audio_files_path):
+            shutil.rmtree(user_audio_files_path)
+
         await cl.context.emitter.emit("clear", {})
     except Exception as e:
         print(f"{datetimestamp()} - INFO - cl.on_chat_end hit Exception: {e}")
@@ -377,18 +384,7 @@ async def generate_audio_for_step(action: cl.Action):
     llm_model = action.payload.get("llm_model")
 
     # Filter response - real text only (remove emojis and wrapped texts, like (text) and *text*)
-    response_text = full_response
-    descriptions = re.compile(r"(?:\(|（|\*)\S(?:.*?\S)?(?:\)|）|\*)")
-    missing_periods = re.compile(r"[a-z]+ {2,}", re.IGNORECASE)
-    excess_blank_spaces = re.compile(r" {2,}|\n")
-
-    response_text = emoji.replace_emoji(response_text, replace="").strip()
-    for instance in re.findall(descriptions, response_text):
-        response_text = response_text.replace(instance, instance.replace("*", ""))
-    for instance in re.findall(missing_periods, response_text):
-        response_text = response_text.replace(instance, instance.replace("  ", ". "))
-    for instance in re.findall(excess_blank_spaces, response_text):
-        response_text = response_text.replace(instance, "" if "\n" in instance else " ")
+    response_text = purify_string(input_string=full_response)
 
     # Ask the selected LLM model to describe the flow of emotions in the full response using 3 English adjectives.
     emotions = await describe_emotions(text=full_response, llm_model=llm_model)
@@ -396,8 +392,8 @@ async def generate_audio_for_step(action: cl.Action):
 
     # Detect the response's language
     supported_languages = ['en', 'es', 'fr', 'de', 'it', 'pt', 'pl', 'tr', 'ru', 'nl', 'cs', 'ar', 'zh-cn', 'hu', 'ko', 'ja', 'hi']
-    language_detected = detect(response_text)
-    language_used = language_detected if language_detected in supported_languages else "en"
+    language_detected = detect(response_text*200)       # Duplicate text for more accurate detection
+    language_used = language_detected if language_detected in supported_languages else "en"     # Fall back to English if language detected is not available
     print(f"\nMost probable language of LLM response: {language_detected}. Language to be used by TTS: {language_used}\n")
 
     # Create user's folder in storage/audio if not exist yet
@@ -407,9 +403,10 @@ async def generate_audio_for_step(action: cl.Action):
     # Enable TTS voice button with XTTS Voice Cloning
     if XTTS_MODEL and response_text:
         try:
-            response_audio = f"{audio_folder_of_user}/{username}_{datetimestamp(no_space=True)}.wav"
+            audio_filename = f"{username}_{datetimestamp(no_space=True)}.wav"
+            response_audio = f"{audio_folder_of_user}/{audio_filename}"
             XTTS_MODEL.tts_to_file(
-                text=emoji.replace_emoji(response_text.strip(), replace="").strip(),
+                text=response_text,
                 speaker_wav=VOICE_SAMPLE_PATH,
                 language=language_used,
                 file_path=response_audio,
@@ -417,7 +414,7 @@ async def generate_audio_for_step(action: cl.Action):
             )
             audio_element = cl.Audio(
                 path=response_audio,
-                name="", 
+                name=f"Response audio in language: {language_used}"                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             , 
                 mime="audio/wav",
                 display="inline",
             )
