@@ -383,15 +383,12 @@ async def generate_audio_for_step(action: cl.Action):
     excess_blank_spaces = re.compile(r" {2,}|\n")
 
     response_text = emoji.replace_emoji(response_text, replace="").strip()
-
     for instance in re.findall(descriptions, response_text):
-        response_text = response_text.replace(instance, "")
-
+        response_text = response_text.replace(instance, instance.replace("*", ""))
     for instance in re.findall(missing_periods, response_text):
         response_text = response_text.replace(instance, instance.replace("  ", ". "))
-
     for instance in re.findall(excess_blank_spaces, response_text):
-        response_text = response_text.replace(instance, " ")
+        response_text = response_text.replace(instance, "" if "\n" in instance else " ")
 
     # Ask the selected LLM model to describe the flow of emotions in the full response using 3 English adjectives.
     emotions = await describe_emotions(text=full_response, llm_model=llm_model)
