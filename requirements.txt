@@ -30,4 +30,7 @@ emoji>=2.15.0
 # Gradio client for Fish Speech TTS
 gradio_client>=2.0.2
 
+# For launcher.py showing an icon in system tray
+pystray>=0.19.5
+
 # Note: torch, torchvision, torchaudio are installed separately with CUDA support
