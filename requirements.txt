@@ -4,8 +4,8 @@ chainlit>=1.1.0
 # Ollama client
 ollama>=0.3.0
 
-# TTS (Coqui XTTS-v2 for voice cloning)
-TTS>=0.22.0
+# For TTS
+gradio_client>=2.0.2
 
 # Language detection for TTS
 langdetect>=1.0.9
@@ -21,14 +21,12 @@ requests>=2.31.0
 bcrypt>=4.0.1
 python-dotenv>=1.0.0
 
-# Required for Chainlit persistence
+# Required for Chainlit persistence in database
 asyncpg>=0.29.0
+boto3>=1.42.21
 
 # Remove emoji from responses to generate clean audio
 emoji>=2.15.0
-
-# For TTS
-gradio_client>=2.0.2
 
 # For launcher.py showing an icon in system tray
 pystray>=0.19.5

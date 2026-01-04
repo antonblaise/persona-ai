@@ -1,11 +1,14 @@
 import json
 import re
 import emoji
+import shutil
 from datetime import datetime
 from pathlib import Path
 import chainlit as cl
 from chainlit.input_widget import Select, Slider, Switch
 from ollama import AsyncClient
+from pydub import AudioSegment
+from gradio_client import Client
 
 
 def datetimestamp(no_space=False) -> str:
@@ -14,13 +17,13 @@ def datetimestamp(no_space=False) -> str:
 def double_each_step(first_number: int, number_of_steps: int) -> list[str]:
 
     # Return a list of doubling numbers, starting from first_number.
-    # e.g.: 1, 2, 4, 8, 16, 32, 64, ... for number_of_steps
+    #       e.g.: 1, 2, 4, 8, 16, 32, 64, ... for number_of_steps
     return [str(first_number * (2 ** i)) for i in range(number_of_steps + 1)]
 
 def flatten_json(d, parent_key="", sep="."):
 
     # Flatten nested JSON into dot notation keys.
-    # Example: {"a": {"b": 1}} => {"a.b": 1}
+    #       Example: {"a": {"b": 1}} => {"a.b": 1}
     
     items = {}
     for k, v in d.items():
@@ -38,57 +41,127 @@ def render_system_prompt(template_path: Path, persona_path: Path, user_path: Pat
 
     # Generate the full system prompt using user's JSON file and the template system-prompt.txt.
 
-    # Load template and JSONs
+    #       Load template and JSONs
     template = template_path.read_text(encoding="utf-8")
     persona = json.loads(persona_path.read_text(encoding="utf-8"))
     user = json.loads(user_path.read_text(encoding="utf-8"))
 
-    # Flatten JSONs
+    #       Flatten JSONs
     flat_persona = flatten_json(persona)
     flat_user = flatten_json(user)
 
-    # Prepare placeholder dictionary
+    #       Prepare placeholder dictionary
     placeholders = {}
     for key, val in flat_persona.items():
         placeholders[f"persona.{key}"] = str(val)
     for key, val in flat_user.items():
         placeholders[f"user.{key}"] = str(val)
 
-    # Replace placeholders in template
+    #       Replace placeholders in template
     system_prompt = template
     for key, val in placeholders.items():
         system_prompt = system_prompt.replace(f"{{{{{key}}}}}", val)
 
     return system_prompt.replace(r"{{datetime}}", datetime.now().strftime("%A, %Y-%m-%d %H:%M:%S"))
 
-def purify_string(input_string: str) -> str:
+def clean_paragrapher_for_tts(full_response_text: str) -> list:
 
     # Filter a text filled emojis, new lines, special characters, etc, into one single line of sentences.
 
-    output_string = input_string
+    #       Remove emojis
+    full_response_text = emoji.replace_emoji(full_response_text, replace="").strip()
 
-    # Remove emojis
-    output_string = emoji.replace_emoji(output_string, replace="").strip()
+    #       Remove code/command snippets - ``` code/command ```
+    code_snippets = re.findall(re.compile(r"(\`\`\`[\s\S]*?\n\`\`\`)"), full_response_text)
+    for snippet in code_snippets:
+        full_response_text = full_response_text.replace(snippet, "")        
 
-    # Parentheses - English and Chinese - ( )（ ）
-    # Asterisks - *
-    # ... no white spaces after the first and before the second. e.g.: *text*, (text)
-    descriptions = re.findall(re.compile(r"(?:（|\*)\S(?:.*?\S)?(?:）|\*)"), output_string)
-    wrapped_text = re.findall(re.compile(r"(?:（|\*)(\S.*?\S)?(?:）|\*)"), output_string)
-    for i in range(len(descriptions)):
-        output_string = output_string.replace(descriptions[i], f"{wrapped_text[i]}.")
+    #       Asterisks - *text*
+    asterisks = re.findall(re.compile(r"(?:\*.*?\*)"), full_response_text)
+    asterisks_content = re.findall(re.compile(r"(?:\*(.*?)\*)"), full_response_text)
+    for i in range(len(asterisks)):
+        full_response_text = full_response_text.replace(asterisks[i], f"{asterisks_content[i]}")
 
-    # Missing periods/full stops
-    missing_periods = re.findall(re.compile(r"[a-z]+ {2,}", re.IGNORECASE), output_string)
-    for instance in missing_periods:
-        output_string = output_string.replace(instance, f"{instance.strip()}. ")
-
-    # Exsessive blank spaces like "\n" and "  "
-    excess_blank_spaces = re.findall(re.compile(r" {2,}|\n"), output_string)
+    #       Exsessive blank spaces - "  " or longer
+    excess_blank_spaces = re.findall(re.compile(r" {2,}"), full_response_text)
     for instance in excess_blank_spaces:
-        output_string = output_string.replace(instance, "" if "\n" in instance else " ")
+        full_response_text = full_response_text.replace(instance, " ")
 
-    return output_string.strip()
+    #       Excessive new/blank lines - "\n\n" or longer
+    excess_new_lines = re.findall(re.compile(r"\n{2,}"), full_response_text)
+    for instance in excess_new_lines:
+        full_response_text = full_response_text.replace(instance, "\n")
+
+    #       Group the lines in paragraphs of max n lines
+    n = 4
+    text_lines = [line.strip() for line in full_response_text.splitlines()]
+
+    text_paragraphs = [ " ".join(text_lines[ i : i+n ]) for i in range(0, len(text_lines), n) ]
+    
+    return text_paragraphs
+
+def join_wav_files(wav_files: list, output_wav_path: str):
+
+    # Combine multiple .wav files into one
+
+    #       If wav_files list is empty
+    if not wav_files:
+        print("\nINFO - No .wav file given to join.\n")
+        return None
+    elif len(wav_files) == 1:
+        print("\nINFO - Only one .wav file given. No joining is done.\n")
+        shutil.move(wav_files[0], output_wav_path)
+        print(f"\nINFO - Saved\n\t{wav_files[0]}\nas\n\t{output_wav_path}")
+        return None
+    else:
+
+        combine_success = False
+        max_retries: int = 30
+        retry_attempt: int = 0
+
+        while not combine_success and retry_attempt <= max_retries:
+
+            print(f"\nCombining ...\n")
+
+            #       Create an empty .wav
+            output_wav = AudioSegment.empty()
+            total_wav_length = 0
+
+            #       Combine the given .wav files and calculate their total duration
+            for wav_file in wav_files:
+                output_wav += AudioSegment.from_wav(wav_file)
+                print(f"\t{wav_file}")
+                total_wav_length += len(AudioSegment.from_wav(wav_file))
+            
+            output_wav.export(output_wav_path, format="wav")
+
+            #       Verify that the exported .wav file's duration 
+            #       equals to the calculated total from the given .wav files
+            if len(AudioSegment.from_wav(output_wav_path)) == total_wav_length:
+                combine_success = True
+                print(f"\nSuccess! Saved as\n\t{output_wav_path}\n")
+            else:
+                retry_attempt += 1
+                print(f"\nCombination failed.\nRetry attempt: {retry_attempt} of {max_retries}\n")
+
+def text_to_speech(client: Client, input_text: str, voice_sample: dict | None):
+    # Generate audio .wav file from given text
+
+    response_audio = client.predict(
+        text=input_text,
+        reference_id="",
+        reference_audio=voice_sample,
+        max_new_tokens=0,
+        chunk_length=400,
+        top_p=0.8,
+        repetition_penalty=1.1,
+        temperature=0.8,
+        seed=0,
+        use_memory_cache="on",
+        api_name="/partial"
+    )
+
+    return response_audio
 
 
 # ---------------------------------------------------- Async functions ---------------------------------------------------- #

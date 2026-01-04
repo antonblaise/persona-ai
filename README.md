@@ -6,7 +6,7 @@ This repo is intentionally a **blank slate** — no pre-defined name, personalit
 You clone it, run the setup, and mold your companion from scratch: give it a name, a voice, a story, train it on your data, and make it truly yours.
 
 **Features (when complete)**  
-- Chat with a powerful local LLM (Dolphin 3.0 Llama-3.1 8B uncensored)  
+- Chat with a powerful local text-to-text LLM (such as Dolphin 3.0 Llama-3.1 8B uncensored)  
 - Inline image generation & editing (FLUX.1 via ComfyUI)  
 - Short video generation (Wan 2.1 / Mochi-1)  
 - Multimodal analysis (Qwen2.5-VL for images/videos/docs)  
@@ -18,6 +18,25 @@ You clone it, run the setup, and mold your companion from scratch: give it a nam
 
 **Tech Stack Summary**  
 See `documentation/tech-stack.csv` for the full finalized stack.
+
+## Quick Start
+
+### ⚠️ Make sure you've completed the Setup Guide!  
+
+Run these commands in the root directory of this project ─ `persona-ai/`
+
+```cmd
+docker start chainlit-datalayer-localstack-1
+conda create -n persona-ai python=3.11 -y
+conda activate persona-ai
+conda install -c conda-forge ffmpeg
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/<cu***>
+pip install -r requirements.txt
+hf download fishaudio/openaudio-s1-mini --local-dir public/fishaudio/models/openaudio-s1-mini
+docker run -d --name fish-speech -p 8081:7860 --gpus all -v "%CD%\public\fishaudio\models":/app/checkpoints -e BACKEND=cuda -e COMPILE=1 fishaudio/fish-speech:latest
+launcher.bat
+```
+`<cu***>`: Find out the correct version for your GPU. For example, RTX 4070 uses 'cu121'.
 
 ## Setup Guide (Windows 11 + NVIDIA GPU)
 
@@ -120,7 +139,7 @@ In this stage, we will implement the open-source customizable [Chainlit UI](http
     If everything looks good → no further action.
 
 2. Download and Install PostgreSQL  
-    PostgreSQL acts as the database to store the memories of the AI persona. When implemented, we enable data persistence on Chainlit.  
+    PostgreSQL acts as the database to store the memories of the AI persona. When implemented, we enable data persistence on Chainlit, which we cover in Stage 4 later on.  
     Download and install it from here: https://www.postgresql.org/download/  
     For chat history and side bar to be enabled, Chainlit requires authentication and data persistence to be enabled beforehand.  
 
@@ -142,45 +161,73 @@ In this stage, we will implement the open-source customizable [Chainlit UI](http
 
 **Stage 3 complete** - you now have a full-featured, ChatGPT-style browser interface connected to your local LLM!
 
-### Stage 4️⃣: Persona & Customization
+### Stage 4️⃣: PostgreSQL Database, UI Customization and TTS
 
 In this stage, we will enable useful features in Chainlit UI, and also customize the UI to suit our persona's themes.  
 
 1. Chainlit Database and Chat Histories  
     First of all, for chat history and sidebar to be enabled, we need to integrate PostgreSQL to Chainlit.  
 
-    - **Create database for the AI**  
+    - **Create PostgreSQL database for the AI**  
+        We will use our own PostgreSQL database on our own local computer instead of the one created by `chainlit-datalayer` on the next step.  
         Open `pgAdmin` on your computer.  
         On `Object Explorer` panel, right-click on `Servers > PostgreSQL > Databases`.  
         Then click on `Create > Database`.  
-        Give it a name, and then click `Save`.  
+        Name it as `persona-ai`, and then click `Save`.  
+        (Of course you may use another name, but we'll be using the name `persona-ai` throughout this guide)  
         The newly created database now shows under `Databases`.  
 
-    - **Imprint the Prisma schema of Chainlit datalayer to the database**  
+    - **Use Chainlit's official datalayer as the database**  
+        In this step, we will create and run 2 Docker containers:
+        - A new empty PostgreSQL, which we will **not** use.
+        - A fake S3 bucket - to simulate cloud storage for elements.
+
+        We do not use the PostgreSQL from the container, because as I tested, somehow the `root` user with password `root` is not authenticated.
+
         In a folder **outside** of this project folder, clone the [chainlit-datalayer](https://github.com/Chainlit/chainlit-datalayer) repository:
         ```cmd
         git clone https://github.com/Chainlit/chainlit-datalayer
         ```
+
         Navigate into the `chainlit-datalayer` folder, create a file named `.env` in its root directory.
-        Edit this line and paste it into `.env`:
+        Copy paste all these lines into `.env`:
         ```
-        DATABASE_URL=postgresql://<database owner name>:<password>@localhost:5432/<database name>
+        DATABASE_URL=postgresql://<database owner name>:<password>@localhost:5432/persona-ai
         ```
         For example:
         ```
         DATABASE_URL=postgresql://postgres:postgres_Password@localhost:5432/persona-ai
         ```
-        Now, still in the root directory, run:
+        _⚠️ **IMPORTANT**  
+        If your password contains special characters like `!@#`, encode them using URL/Percent encoding ─ `%21%40%23`.  
+        Use this website to help you: https://www.url-encode-decode.com_
+
+        (Optional) Comment out/Delete the `postgres` service in the `compose.yml`, so the `postgres` container won't be created. Or just delete it later on.
+
+        Now, to enable the fake AWS S3 cloud storage container ─ still in the root directory, run these:
         ```cmd
+        docker compose up -d 
+        ```
+
+        Notice that the container named `chainlit-datalayer-localstack-1` is not created and running.  
+        That's where chat media (audio, pictures, etc) aka chat elements will be stored, because they'll **not** be stored on PostgreSQL.
+
+        We need to migrate the database schema of the `chainlit-datalayer` into our PostgreSQL database.  
+        Still in the `chainlit-datalayer` repository's root directory, run:
+        ```
         npx prisma migrate deploy
         ```
+        Given that your `DATABASE_URL` in the `.env` is given correctly, the command should work. Now, our DB follows the official schema of `chainlit-datalayer`.
+
         (Optional) The database can be viewed and edited in a browser by running this command in the `chainlit-datalayer` root directory:
         ```cmd
         npx prisma studio
         ```
-    
+
+        With this, we're done with working in the `chainlit-datalayer` repository.
+
     - **Setup Chainlit environment in our project**  
-        Copy the `.env` file created in `chainlit-datalayer` folder just now into this project's root directory.  
+        Copy the `.env` file created in `chainlit-datalayer` folder just now into this project ─ `persona-ai`'s root directory.  
         Run this command in this project's root directory:
         ```
         chainlit create-secret
@@ -193,8 +240,21 @@ In this stage, we will enable useful features in Chainlit UI, and also customize
         CHAINLIT_AUTH_SECRET="*abcdefghijklmnopqrstuvwxyz!@#$%^&><:?0123456789"
         ```
 
+        Use `ipconfig` to get the LAN IP address of your host machine. E.g.: 192.168.0.12
+        
+        Copy and paste these lines into **your** `.env` file. Put in your host machine's LAN address.
+        ```
+        # S3 configuration.
+        BUCKET_NAME=my-bucket
+        APP_AWS_ACCESS_KEY=random-key
+        APP_AWS_SECRET_KEY=random-key
+        APP_AWS_REGION=eu-central-1
+        DEV_AWS_ENDPOINT=http://<host's LAN IP address>:4566
+        ```
+        These are the configurations to connect to the fake AWS S3 cloud storage. 
+
 2. Chainlit Environment Configuration for `app.py`  
-    First of all, paste this into your `.env` file:
+    First of all, paste these into your `.env` file:
     ```
     # Network & Server Settings
     CHAINLIT_HOST=0.0.0.0
@@ -205,21 +265,25 @@ In this stage, we will enable useful features in Chainlit UI, and also customize
     OLLAMA_MAX_LOADED_MODELS=5
 
     # Hardware Optimization
-    # Setting this to 1 helps reduce VRAM usage on your RTX 4070
+    # Setting this to 1 helps reduce VRAM usage on your GPU
     OLLAMA_FLASH_ATTENTION=1 
 
     # Application Paths
     SYSTEM_PROMPT_PATH=templates/system-prompt.txt
-    USER_JSON_PATH=public/users
+    USER_JSON_FOLDER=public/users
+    VOICE_SAMPLE_PATH=public/voice/persona.wav
+    RESPONSE_AUDIO_FOLDER=storage/audio
     ```
-
-    `CHAINLIT_HOST`: Host on the LAN IP address.
-    `CHAINLIT_PORT`: The LAN IP port to use.
-    `OLLAMA_NUM_PARALLEL`: How many concurrent users can be processed at once.  
-    `OLLAMA_MAX_LOADED_MODELS`: The number of LLM models Ollama keeps loaded in memory (VRAM/RAM) simultaneously.  
-    `OLLAMA_FLASH_ATTENTION`: Enables Flash Attention, an optimized attention mechanism for transformers that reduces memory usage and improves inference speed on NVIDIA GPUs. Helpful for larger models (e.g., 7-13B) by minimizing VRAM overhead during attention computations.  
-    `system-prompt.txt`: A system prompt is a prompt fed into the AI to define its details. This file is a template file that `app.py` edits and feeds into the AI model.  
-    `public/users`: Folder where each user's system prompt JSON file resides. `app.py` will fall back to just using the Guest profile if this folder doesn't exist.   
+    Explanation:
+    - `CHAINLIT_HOST`: Host on the LAN IP address.
+    - `CHAINLIT_PORT`: The LAN IP port to use.
+    - `OLLAMA_NUM_PARALLEL`: How many concurrent users can be processed at once.  
+    - `OLLAMA_MAX_LOADED_MODELS`: The number of LLM models Ollama keeps loaded in memory (VRAM/RAM) simultaneously.  
+    - `OLLAMA_FLASH_ATTENTION`: Enables Flash Attention, an optimized attention mechanism for transformers that reduces memory usage and improves inference speed on NVIDIA GPUs. Helpful for larger models (e.g., 7-13B) by minimizing VRAM overhead during attention computations.  
+    - `SYSTEM_PROMPT_PATH`: A system prompt is a prompt fed into the AI to define its details. This file is a template file that `app.py` edits and feeds into the AI model.  
+    - `USER_JSON_FOLDER`: Folder where each user's system prompt JSON file resides. `app.py` will fall back to just using the Guest profile if this folder doesn't exist.  
+    - `VOICE_SAMPLE_PATH`: Voice sample to clone for your AI persona.  
+    - `RESPONSE_AUDIO_FOLDER`: Output folder for audio files (.wav) generated from persona's response text.
 
     Now, create the `public` folder in the root directory of this project. We'll be using this folder extensively in the upcoming steps.  
 
@@ -321,8 +385,9 @@ In this stage, we will enable useful features in Chainlit UI, and also customize
     
     Feel free to explore and experiment around for more customizations!
 
-4. Enable XTTS Voice for Responses  
+4. Enable TTS Voice for Responses  
     Create a folder named `voice` in `public` folder. Put the voice sample for your persona into the folder as `persona.wav`.  
+    _Recommended: Clear audio with no background music or noise, between 30 seconds and 3 minutes._  
 
     ```
     persona-ai/
@@ -338,23 +403,5 @@ In this stage, we will enable useful features in Chainlit UI, and also customize
 1. Install ComfyUI  
     Go to this link, download and install ComfyUI: https://www.comfy.org/download  
     After installed, launch it for further setups.
-    
 
-
-## Quick Start
-
-Run these commands in the root directory of this project ─ `persona-ai/`
-
-```cmd
-conda create -n persona-ai python=3.11 -y
-conda activate persona-
-conda install -c conda-forge ffmpeg
-pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/<cu***>
-pip install -r requirements.txt
-hf download fishaudio/openaudio-s1-mini --local-dir public/fishaudio/models/openaudio-s1-mini
-docker run -d --name fish-speech -p 8081:7860 --gpus all -v "%CD%\public\fishaudio\models":/app/checkpoints -e BACKEND=cuda -e COMPILE=1 fishaudio/fish-speech:latest
-launcher.bat
-```
-`<cu***>`: Find out the correct version for your GPU. For example, RTX 4070 uses 'cu121'.
-
-
+...

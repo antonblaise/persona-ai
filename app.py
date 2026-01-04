@@ -26,6 +26,8 @@ from chainlit.types import ThreadDict
 
 # ==================== Chainlit Data Layer (optional/custom) ====================
 import chainlit.data.chainlit_data_layer as cl_data
+import boto3
+from botocore.exceptions import ClientError
 
 # ==================== Custom functions ====================
 from lib.helper_functions import *
@@ -58,15 +60,16 @@ cl_data.ChainlitDataLayer.create_step = patched_create_step
 load_dotenv()
 DATABASE_URL = os.getenv("DATABASE_URL", "")
 SYSTEM_PROMPT_PATH = os.getenv("SYSTEM_PROMPT_PATH", "templates/system-prompt.txt")
-USER_JSON_PATH = os.getenv("USER_JSON_PATH", "public/users")
+USER_JSON_FOLDER = os.getenv("USER_JSON_FOLDER", "public/users")
 VOICE_SAMPLE_PATH = os.getenv("VOICE_SAMPLE_PATH", None)
-RESPONSE_AUDIO_PATH = os.getenv("RESPONSE_AUDIO_PATH", "storage/audio")
+RESPONSE_AUDIO_FOLDER = os.getenv("RESPONSE_AUDIO_FOLDER", "storage/audio")
+BUCKET_NAME = os.getenv("BUCKET_NAME", "my-bucket")
 
 #       Registered users
 USER_JSON_FILES = ['templates/user.json']
-if os.path.isdir(USER_JSON_PATH):
-    if os.listdir(USER_JSON_PATH) != []:
-        USER_JSON_FILES = os.listdir(USER_JSON_PATH)
+if os.path.isdir(USER_JSON_FOLDER):
+    if os.listdir(USER_JSON_FOLDER) != []:
+        USER_JSON_FILES = os.listdir(USER_JSON_FOLDER)
 
 #       Fetch installed Ollama and set a default model
 AVAILABLE_MODELS = [model['model'] for model in ollama.list()['models']]
@@ -79,6 +82,20 @@ DEFAULT_MODEL = "deepseek-r1:8b"
 if DEFAULT_MODEL not in AVAILABLE_MODELS:
     DEFAULT_MODEL = AVAILABLE_MODELS[0]
 
+#       S3 client setup
+DEV_AWS_ENDPOINT = os.getenv("DEV_AWS_ENDPOINT", "http://localhost:4566")
+APP_AWS_ACCESS_KEY = os.getenv("APP_AWS_ACCESS_KEY", "random-key")
+APP_AWS_SECRET_KEY = os.getenv("APP_AWS_SECRET_KEY", "random-key")
+APP_AWS_REGION = os.getenv("APP_AWS_REGION", "eu-central-1")
+
+s3_client = boto3.client(
+    's3',
+    endpoint_url=DEV_AWS_ENDPOINT,
+    aws_access_key_id=APP_AWS_ACCESS_KEY,
+    aws_secret_access_key=APP_AWS_SECRET_KEY,
+    region_name=APP_AWS_REGION
+)
+
 # -------------------------------------------------------- #
 
 
@@ -89,7 +106,7 @@ def password_auth_callback(username: str, password: str) -> Optional[cl.User]:
         with open(USER_JSON_FILES[0], "r", encoding="utf-8") as f:
             user_data = json.load(f)
     elif f"{username}.json" in USER_JSON_FILES:
-        with open(f"{USER_JSON_PATH}/{username}.json", "r", encoding="utf-8") as f:
+        with open(f"{USER_JSON_FOLDER}/{username}.json", "r", encoding="utf-8") as f:
             user_data = json.load(f)
     else:
         print(f"[ERROR] User '{username}' does not exist.")
@@ -147,12 +164,12 @@ async def on_message(message: cl.Message):
     llm_input = [{"role": "system", "content": system_prompt}] + history
 
     # Stream using AsyncClient
-    client = AsyncClient()
+    async_client = AsyncClient()
     disable_thought_process = settings.get("disable_thought_process", False)
 
     try:
         if disable_thought_process:
-            stream = await client.chat(
+            stream = await async_client.chat(
                 model=selected_model,
                 messages=llm_input,
                 stream=True,
@@ -165,7 +182,7 @@ async def on_message(message: cl.Message):
                 }
             )
         else:
-            stream = await client.chat(
+            stream = await async_client.chat(
                 model=selected_model,
                 messages=llm_input,
                 stream=True,
@@ -232,11 +249,10 @@ async def on_message(message: cl.Message):
         msg.actions = [
             cl.Action(
                 name="tts_button",
-                icon="speaker",
+                icon="volume-2",
                 payload={
                     "message_content": msg.content,
                     "message_id": msg.id,
-                    "llm_model": selected_model,
                 },
             )
         ]
@@ -271,72 +287,31 @@ async def on_chat_resume(thread: ThreadDict):
     # Enable settings UI (model, temp, etc.) and inherit the old settings
     await send_chainlit_settings(available_models=AVAILABLE_MODELS, default_model=DEFAULT_MODEL, saved_settings=cl.user_session.get('settings'))
 
-    # Reset chat history
-    cl.user_session.set("chat_history", [])
+    # Reconstruct action buttons
+    for step in thread['steps'] or []:
 
-    # Rebuild history from previous thread steps
-    history = []
-    steps = thread.get("steps", [])
-
-    # Clear all elements to avoid unnecassary empty spaces
-    thread['elements'] = []
-
-    # First, map thinking steps to their parent messages
-    thinking_by_parent = {}
-    
-    for step in steps:
-        if step.get("type") == "step" and step.get("name") == "Thought Process":
-            parent_id = step.get("parentId")
-            if parent_id:
-                thinking_by_parent[parent_id] = step.get("output", step.get("content", ""))
-    
-    # Now reconstruct the conversation
-    for step in steps:
-        step_type = step.get("type")
-        
-        if step_type == "user_message":
-            history.append({"role": "user", "content": step.get("output", "")})
-            
-        elif step_type == "assistant_message":
-            step_id = step.get("id")
-            thinking_content = thinking_by_parent.get(step_id, "")
-            response_content = step.get("output", "")
-            
-            if not response_content:
-                continue  # Skip empty messages
-                
-            full_content = f"{thinking_content}\n\n{response_content}" if thinking_content else response_content
-            
-            history.append(
-                {
-                    "role": "assistant",
-                    "content": full_content,
-                }
+        step_actions = []
+        # Audio (TTS) button
+        step_actions.append(
+            cl.Action(
+                name="tts_button",
+                icon="volume-2",
+                payload={
+                    "message_content": step['output'],
+                    "message_id": step['id'],
+                },
             )
+        )
 
-            # Re-add the TTS speaker button to the persisted message ===
-            message = cl.Message(
-                id=step_id,
-                content=response_content,   # Use the original output (without thinking prefix)
-                actions=[
-                    cl.Action(
-                        name="tts_button",
-                        icon="speaker",
-                        payload={
-                            "message_content": response_content,
-                            "message_id": step_id
-                        },
-                    )
-                ]
-            )
-
-            await message.send()
-
-
-        else:
-            pass
-
-    cl.user_session.set("chat_history", history)
+        # Edit directly on the assistant message
+        if step['type'] == "assistant_message":
+            await cl.Message(
+                id=step['id'],
+                author=step['name'],
+                content=step['output'],
+                actions=step_actions
+            ).update()
+  
 
 @cl.on_chat_end
 async def on_chat_end():
@@ -345,7 +320,7 @@ async def on_chat_end():
         username = cl.user_session.get("user").identifier
 
         # Delete generated media files of the user
-        user_audio_files_path = f"{RESPONSE_AUDIO_PATH}/{username}"
+        user_audio_files_path = f"{RESPONSE_AUDIO_FOLDER}/{username}"
         if os.path.isdir(user_audio_files_path):
             shutil.rmtree(user_audio_files_path)
 
@@ -377,10 +352,10 @@ async def generate_audio_for_step(action: cl.Action):
     username = cl.user_session.get('user').identifier
 
     # Filter response - real text only (remove emojis and wrapped texts, like (text) and *text*)
-    response_text = purify_string(input_string=full_response)
+    response_paragraphs = clean_paragrapher_for_tts(full_response_text=full_response)
 
     # If there's no words, just skip audio generation
-    if response_text == "":
+    if response_paragraphs == []:
         await cl.Message(
             content=f"⚠️ `The response has no words.`",
             author="System",
@@ -391,48 +366,24 @@ async def generate_audio_for_step(action: cl.Action):
         return None
 
     # Create user's folder in storage/audio if not exist yet
-    audio_folder_of_user = f"{RESPONSE_AUDIO_PATH}/{username}"
-    os.mkdir(audio_folder_of_user) if not os.path.isdir(audio_folder_of_user) else None  
+    audio_folder_of_user = f"{RESPONSE_AUDIO_FOLDER}/{username}"
+    os.mkdir(audio_folder_of_user) if not os.path.isdir(audio_folder_of_user) else None
+
+    audio_filename = f"{username}_{message_id}.wav"
+    audio_output_file = f"{audio_folder_of_user}/{audio_filename}"
 
     # ------- Enable TTS voice button with Voice Cloning - fishaudio/fish-speech -------
-    client = Client("http://localhost:8081")
 
-    if response_text:
+    tts_client = Client("http://localhost:8081")
+    response_paragraphs_audio: list = []
+
+    for i, paragraph in enumerate(response_paragraphs):
+
+        print(f"\nParagraph {i+1}/{len(response_paragraphs)}:\n{paragraph}\n")
+
         try:
-            audio_filename = f"{username}_{datetimestamp(no_space=True)}.wav"
-            audio_output_file = f"{audio_folder_of_user}/{audio_filename}"
-
             # Generate audio .wav file
-            response_audio = client.predict(
-                text=response_text,
-                reference_id="",
-                reference_audio=voice_sample,
-                max_new_tokens=0,
-                chunk_length=400,
-                top_p=0.8,
-                repetition_penalty=1.1,
-                temperature=0.8,
-                seed=0,
-                use_memory_cache="on",
-                api_name="/partial"
-            )
-
-            # Cut and paste into user's audio folder
-            print(response_audio[0])
-            shutil.move(response_audio[0], audio_output_file)
-
-            # Create Chainlit audio element
-            audio_action = cl.Audio(
-                path=audio_output_file,
-                name="🔊",
-                mime="audio/wav",
-                display="inline",
-            )
-
-            # Point to the message and append the audio element into it.
-            message = cl.Message(id=message_id, content=full_response, elements=[audio_action])
-            # message.actions.append(audio_action)
-            await message.send()
+            response_audio = text_to_speech(client=tts_client, input_text=paragraph, voice_sample=voice_sample)
         except Exception as e:
             await cl.Message(
                 content=f"⚠️ `{str(e)}`",
@@ -440,3 +391,39 @@ async def generate_audio_for_step(action: cl.Action):
                 type="system_message"
             ).send()
             print(f"{datetimestamp()} - ERROR - TTS generation failed: {e}")
+            return None
+
+        # Collect all the .wav files into a list of their paths
+        response_paragraphs_audio.append(response_audio[0])
+
+    # Combine into one final .wav file, save as audio_output_file and ... upload to S3
+    join_wav_files(response_paragraphs_audio, audio_output_file)
+
+    # ... upload to S3
+    s3_client.upload_file(audio_output_file, BUCKET_NAME, audio_filename)
+
+    url_of_the_wav_file = f"{DEV_AWS_ENDPOINT}/{BUCKET_NAME}/{audio_filename}"
+
+    print(f"\n{audio_filename} in S3 at:\n{url_of_the_wav_file}\n")
+
+    # Create Chainlit audio element
+    audio_element = cl.Audio(
+        url=url_of_the_wav_file,
+        mime="audio/wav",
+        display="inline",
+    )
+
+    # Point to the message and append the audio element into it.
+    message = cl.Message(
+        id=message_id,
+        content=full_response,
+        elements=[audio_element],
+        metadata={
+            "audio_url": url_of_the_wav_file
+        }
+    )
+
+    await message.update()
+
+    
+
