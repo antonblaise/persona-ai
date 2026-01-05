@@ -78,7 +78,7 @@ if len(AVAILABLE_MODELS) <= 0:
     print("[ERROR] No Ollama models found. Please install some via 'ollama pull'.")
     exit()
 
-DEFAULT_MODEL = "deepseek-r1:8b"
+DEFAULT_MODEL = "deepseek-r1:8b-0528-qwen3-q8_0"
 if DEFAULT_MODEL not in AVAILABLE_MODELS:
     DEFAULT_MODEL = AVAILABLE_MODELS[0]
 
@@ -168,30 +168,28 @@ async def on_message(message: cl.Message):
     disable_thought_process = settings.get("disable_thought_process", False)
 
     try:
+        ollama_options = {
+            "temperature": settings["temperature"],
+            "top_p": settings["top_p"],
+            "num_ctx": int(settings["num_ctx"]) * 1024,
+            "repeat_penalty": 1.1,      # <--- Sets the penalty strength (1.1 is default)
+            "repeat_last_n": -1,        # <--- Look back window tokens, -1 means the entire context window
+            "num_gpu": 999
+        }
         if disable_thought_process:
             stream = await async_client.chat(
                 model=selected_model,
                 messages=llm_input,
                 stream=True,
                 think=False,
-                options={
-                    "temperature": settings["temperature"],
-                    "top_p": settings["top_p"],
-                    "num_ctx": int(settings["num_ctx"]) * 1024,
-                    "num_gpu": 999
-                }
+                options=ollama_options
             )
         else:
             stream = await async_client.chat(
                 model=selected_model,
                 messages=llm_input,
                 stream=True,
-                options={
-                    "temperature": settings["temperature"],
-                    "top_p": settings["top_p"],
-                    "num_ctx": int(settings["num_ctx"]) * 1024,
-                    "num_gpu": 999
-                }
+                options=ollama_options
             )
 
         # Initialize variables
@@ -373,38 +371,38 @@ async def generate_audio_for_step(action: cl.Action):
     audio_output_file = f"{audio_folder_of_user}/{audio_filename}"
 
     # ------- Enable TTS voice button with Voice Cloning - fishaudio/fish-speech -------
+    if not os.path.isfile(audio_output_file):
+        tts_client = Client("http://localhost:8081")
+        response_paragraphs_audio: list = []
 
-    tts_client = Client("http://localhost:8081")
-    response_paragraphs_audio: list = []
+        for i, paragraph in enumerate(response_paragraphs):
 
-    for i, paragraph in enumerate(response_paragraphs):
+            print(f"\nParagraph {i+1}/{len(response_paragraphs)}:\n{paragraph}\n")
 
-        print(f"\nParagraph {i+1}/{len(response_paragraphs)}:\n{paragraph}\n")
+            try:
+                # Generate audio .wav file
+                response_audio = text_to_speech(client=tts_client, input_text=paragraph, voice_sample=voice_sample)
+            except Exception as e:
+                await cl.Message(
+                    content=f"⚠️ `{str(e)}`",
+                    author="System",
+                    type="system_message"
+                ).send()
+                print(f"{datetimestamp()} - ERROR - TTS generation failed: {e}")
+                return None
 
-        try:
-            # Generate audio .wav file
-            response_audio = text_to_speech(client=tts_client, input_text=paragraph, voice_sample=voice_sample)
-        except Exception as e:
-            await cl.Message(
-                content=f"⚠️ `{str(e)}`",
-                author="System",
-                type="system_message"
-            ).send()
-            print(f"{datetimestamp()} - ERROR - TTS generation failed: {e}")
-            return None
+            # Collect all the .wav files into a list of their paths
+            response_paragraphs_audio.append(response_audio[0])
 
-        # Collect all the .wav files into a list of their paths
-        response_paragraphs_audio.append(response_audio[0])
-
-    # Combine into one final .wav file, save as audio_output_file and ... upload to S3
-    join_wav_files(response_paragraphs_audio, audio_output_file)
+        # Combine into one final .wav file, save as audio_output_file and ... upload to S3
+        join_wav_files(response_paragraphs_audio, audio_output_file)
 
     # ... upload to S3
     s3_client.upload_file(audio_output_file, BUCKET_NAME, audio_filename)
 
     url_of_the_wav_file = f"{DEV_AWS_ENDPOINT}/{BUCKET_NAME}/{audio_filename}"
 
-    print(f"\n{audio_filename} in S3 at:\n{url_of_the_wav_file}\n")
+    print(f"\nAudio file '{audio_filename}' uploaded to S3 at:\n\t{url_of_the_wav_file}\n")
 
     # Create Chainlit audio element
     audio_element = cl.Audio(

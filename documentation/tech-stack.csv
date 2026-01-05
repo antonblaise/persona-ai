@@ -8,5 +8,5 @@ Multimodal Analysis,Qwen2.5-VL 7B-32B (quantized),Leading local VLM for image/vi
 Framework / Agents,LangChain,"Robust tool integration, agents, and RAG orchestration."
 Memory / RAG,ChromaDB + Sentence Transformers (all-MiniLM-L6),Efficient long-term user memory and retrieval for personalization.
 Fine-Tuning,Unsloth (LoRA),Fastest GPU-based LoRA fine-tuning for personalizing the core LLM on your dataset.
-Voice / TTS,Piper TTS,High-quality local TTS with customizable voices for your persona.
+Voice / TTS,Fish Audio - openaudio-s1-mini,High-quality local TTS with voice cloning for your persona.
 Network Access,OpenVPN (using your router-exported .ovpn config),"Secure, trusted device access via your existing home VPN setup."

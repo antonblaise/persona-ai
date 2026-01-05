@@ -1,7 +1,9 @@
 import json
 import re
+import os
 import emoji
 import shutil
+import time
 from datetime import datetime
 from pathlib import Path
 import chainlit as cl
@@ -117,11 +119,11 @@ def join_wav_files(wav_files: list, output_wav_path: str):
 
         combine_success = False
         max_retries: int = 30
-        retry_attempt: int = 0
+        retry_attempt: int = 1
 
         while not combine_success and retry_attempt <= max_retries:
 
-            print(f"\nCombining ...\n")
+            print(f"\nCombination attempt: {retry_attempt} of {max_retries}\n")
 
             #       Create an empty .wav
             output_wav = AudioSegment.empty()
@@ -135,14 +137,20 @@ def join_wav_files(wav_files: list, output_wav_path: str):
             
             output_wav.export(output_wav_path, format="wav")
 
+            #       Wait at most 20 seconds for the combination
+            start_time = time.time()
+            export_done = os.path.isfile(output_wav_path)
+            while time.time() - start_time < 20 and not export_done:
+                export_done = os.path.isfile(output_wav_path)
+
             #       Verify that the exported .wav file's duration 
             #       equals to the calculated total from the given .wav files
             if len(AudioSegment.from_wav(output_wav_path)) == total_wav_length:
                 combine_success = True
-                print(f"\nSuccess! Saved as\n\t{output_wav_path}\n")
+                print(f"\nSuccess! Saved as:\n\t{os.path.abspath(output_wav_path)}\n")
             else:
                 retry_attempt += 1
-                print(f"\nCombination failed.\nRetry attempt: {retry_attempt} of {max_retries}\n")
+                print(f"\nCombination failed.\nExpected output .wav length: {total_wav_length}\nActual output .wav length: {len(AudioSegment.from_wav(output_wav_path))}\n")
 
 def text_to_speech(client: Client, input_text: str, voice_sample: dict | None):
     # Generate audio .wav file from given text
@@ -204,7 +212,7 @@ async def send_chainlit_settings(available_models: list, default_model: str, sav
                 min=0.1,
                 max=1.0,
                 step=0.05,
-                initial=saved_settings["top_p"] if saved_settings is not None else 0.9
+                initial=saved_settings["top_p"] if saved_settings is not None else 0.95
             ),
             Select(
                 id="num_ctx",
@@ -217,14 +225,51 @@ async def send_chainlit_settings(available_models: list, default_model: str, sav
 
     cl.user_session.set("settings", settings)
 
-async def describe_emotions(text: str, llm_model: str) -> str:
+async def insert_emotions(text: str, llm_model: str | None) -> str:
 
     client = AsyncClient()
 
-    llm_input = f"In less than 20 English words, accurately describe the emotions conveyed through this given text:\n\n{text.strip()}"
+    emotion_markers = """
+(angry) (sad) (excited) (surprised) (satisfied) (delighted) 
+(scared) (worried) (upset) (nervous) (frustrated) (depressed)
+(empathetic) (embarrassed) (disgusted) (moved) (proud) (relaxed)
+(grateful) (confident) (interested) (curious) (confused) (joyful)
+(disdainful) (unhappy) (anxious) (hysterical) (indifferent) 
+(impatient) (guilty) (scornful) (panicked) (furious) (reluctant)
+(keen) (disapproving) (negative) (denying) (astonished) (serious)
+(sarcastic) (conciliative) (comforting) (sincere) (sneering)
+(hesitating) (yielding) (painful) (awkward) (amused)
+"""
+
+    tone_markers = """
+(in a hurry tone) (shouting) (screaming) (whispering) (soft tone)
+"""
+
+    special_audio_effects = """
+(laughing) (chuckling) (sobbing) (crying loudly) (sighing) (panting)
+(groaning) (crowd laughing) (background laughter) (audience laughing)
+"""
+
+    llm_input = f"""
+From these lists of:-
+emotion markers:
+{emotion_markers},
+tone markers:
+{tone_markers},
+and special audio effects:
+{special_audio_effects},
+insert into the given text below to mark/highlight the emotions and moods.
+Do not alter or delete any of the original words in the given text.
+Do not use words that are not in any of the lists. Use only the words given in the lists, each wrapped in parentheses.
+Example: (laughing) It was very funny! (sighing) (sad) But nobody liked it.
+
+---------------- Text start ----------------
+{text.strip()}
+---------------- Text end ----------------
+"""
 
     response = await client.chat(
-        model=llm_model,
+        model=llm_model | "deepseek-v3.1:671b-cloud",
         messages=[
             {
                 "role": "user",
@@ -241,4 +286,4 @@ async def describe_emotions(text: str, llm_model: str) -> str:
         }
     )
 
-    return str(response['message']['content'].strip().lower())
+    return str(response['message']['content'].strip())
