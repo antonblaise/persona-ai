@@ -8,7 +8,6 @@ from datetime import datetime
 from pathlib import Path
 import chainlit as cl
 from chainlit.input_widget import Select, Slider, Switch
-from ollama import AsyncClient
 from pydub import AudioSegment
 from gradio_client import Client
 
@@ -218,72 +217,9 @@ async def send_chainlit_settings(available_models: list, default_model: str, sav
                 id="num_ctx",
                 label="Context Length (k)",
                 values=double_each_step(4, 6),
-                initial_value=saved_settings["num_ctx"] if saved_settings is not None else "128",
+                initial_value=saved_settings["num_ctx"] if saved_settings is not None else "32",
             )
         ]
     ).send()
 
     cl.user_session.set("settings", settings)
-
-async def insert_emotions(text: str, llm_model: str | None) -> str:
-
-    client = AsyncClient()
-
-    emotion_markers = """
-(angry) (sad) (excited) (surprised) (satisfied) (delighted) 
-(scared) (worried) (upset) (nervous) (frustrated) (depressed)
-(empathetic) (embarrassed) (disgusted) (moved) (proud) (relaxed)
-(grateful) (confident) (interested) (curious) (confused) (joyful)
-(disdainful) (unhappy) (anxious) (hysterical) (indifferent) 
-(impatient) (guilty) (scornful) (panicked) (furious) (reluctant)
-(keen) (disapproving) (negative) (denying) (astonished) (serious)
-(sarcastic) (conciliative) (comforting) (sincere) (sneering)
-(hesitating) (yielding) (painful) (awkward) (amused)
-"""
-
-    tone_markers = """
-(in a hurry tone) (shouting) (screaming) (whispering) (soft tone)
-"""
-
-    special_audio_effects = """
-(laughing) (chuckling) (sobbing) (crying loudly) (sighing) (panting)
-(groaning) (crowd laughing) (background laughter) (audience laughing)
-"""
-
-    llm_input = f"""
-From these lists of:-
-emotion markers:
-{emotion_markers},
-tone markers:
-{tone_markers},
-and special audio effects:
-{special_audio_effects},
-insert into the given text below to mark/highlight the emotions and moods.
-Do not alter or delete any of the original words in the given text.
-Do not use words that are not in any of the lists. Use only the words given in the lists, each wrapped in parentheses.
-Example: (laughing) It was very funny! (sighing) (sad) But nobody liked it.
-
----------------- Text start ----------------
-{text.strip()}
----------------- Text end ----------------
-"""
-
-    response = await client.chat(
-        model=llm_model | "deepseek-v3.1:671b-cloud",
-        messages=[
-            {
-                "role": "user",
-                "content": llm_input
-            }
-        ],        
-        stream=False,
-        think=False,
-        options={
-            "temperature": 0.7,
-            "top_p": 0.9,
-            "num_ctx": 8 * 1024,
-            "num_gpu": 999
-        }
-    )
-
-    return str(response['message']['content'].strip())

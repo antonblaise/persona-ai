@@ -27,7 +27,6 @@ from chainlit.types import ThreadDict
 # ==================== Chainlit Data Layer (optional/custom) ====================
 import chainlit.data.chainlit_data_layer as cl_data
 import boto3
-from botocore.exceptions import ClientError
 
 # ==================== Custom functions ====================
 from lib.helper_functions import *
@@ -163,11 +162,15 @@ async def on_message(message: cl.Message):
     history.append({"role": "user", "content": message.content})
     llm_input = [{"role": "system", "content": system_prompt}] + history
 
-    # Stream using AsyncClient
-    async_client = AsyncClient()
-    disable_thought_process = settings.get("disable_thought_process", False)
-
     try:
+
+        # Initialize variables
+        message = cl.Message(content="💭")
+        await message.send()
+
+        # Initialize options
+        async_client = AsyncClient()    # Use Ollama AsyncClient
+        disable_thought_process = settings.get("disable_thought_process", False)
         ollama_options = {
             "temperature": settings["temperature"],
             "top_p": settings["top_p"],
@@ -176,97 +179,119 @@ async def on_message(message: cl.Message):
             "repeat_last_n": -1,        # <--- Look back window tokens, -1 means the entire context window
             "num_gpu": 999
         }
+        stream_response = settings["stream_response"]
+
+        # Get response from selected LLM model
         if disable_thought_process:
-            stream = await async_client.chat(
+            raw_response = await async_client.chat(
                 model=selected_model,
                 messages=llm_input,
-                stream=True,
+                stream=stream_response,
                 think=False,
                 options=ollama_options
             )
         else:
-            stream = await async_client.chat(
+            # Include thinking whenever available.
+            raw_response = await async_client.chat(
                 model=selected_model,
                 messages=llm_input,
-                stream=True,
+                stream=stream_response,
                 options=ollama_options
             )
 
-        # Initialize variables
+        # Collect thinking and real responses
         response_content = ""
-        thinking_content = ""  # Track thinking separately
-        msg = cl.Message(content="💭")
-        await msg.send()
+        response_thinking = ""
 
-        thinking_step = None
-        first_content = True
+        # Clear placeholder message
+        message.content = ""
+        await message.update()
 
-        async for chunk in stream:
+        # Handle the raw response
+        if stream_response:
 
-            # Use default empty strings to avoid 'NoneType' errors
-            thinking_token = chunk['message'].get('thinking', "")
-            content_token = chunk['message'].get('content', "")
+            # Sample streamed response (raw):
+# model='deepseek-r1:8b-0528-qwen3-q8_0' created_at='2026-01-06T08:27:24.9444491Z' done=False done_reason=None total_duration=None load_duration=None prompt_eval_count=None prompt_eval_duration=None eval_count=None eval_duration=None message=Message(role='assistant', content='', thinking=' Simple', images=None, tool_name=None, tool_calls=None) logprobs=None
+# model='deepseek-r1:8b-0528-qwen3-q8_0' created_at='2026-01-06T08:27:24.9675326Z' done=False done_reason=None total_duration=None load_duration=None prompt_eval_count=None prompt_eval_duration=None eval_count=None eval_duration=None message=Message(role='assistant', content='', thinking=' reply', images=None, tool_name=None, tool_calls=None) logprobs=None
+# model='deepseek-r1:8b-0528-qwen3-q8_0' created_at='2026-01-06T08:27:24.9905384Z' done=False done_reason=None total_duration=None load_duration=None prompt_eval_count=None prompt_eval_duration=None eval_count=None eval_duration=None message=Message(role='assistant', content='', thinking='.\n', images=None, tool_name=None, tool_calls=None) logprobs=None
+# model='deepseek-r1:8b-0528-qwen3-q8_0' created_at='2026-01-06T08:27:25.0561295Z' done=False done_reason=None total_duration=None load_duration=None prompt_eval_count=None prompt_eval_duration=None eval_count=None eval_duration=None message=Message(role='assistant', content='Hello', thinking=None, images=None, tool_name=None, tool_calls=None) logprobs=None
+# model='deepseek-r1:8b-0528-qwen3-q8_0' created_at='2026-01-06T08:27:25.0776623Z' done=False done_reason=None total_duration=None load_duration=None prompt_eval_count=None prompt_eval_duration=None eval_count=None eval_duration=None message=Message(role='assistant', content=' there', thinking=None, images=None, tool_name=None, tool_calls=None) logprobs=None
+# model='deepseek-r1:8b-0528-qwen3-q8_0' created_at='2026-01-06T08:27:25.0996893Z' done=False done_reason=None total_duration=None load_duration=None prompt_eval_count=None prompt_eval_duration=None eval_count=None eval_duration=None message=Message(role='assistant', content='!', thinking=None, images=None, tool_name=None, tool_calls=None) logprobs=None
+            # Notice that 'thinking' always comes first. When thinking, content is blank ''.
+            # Then when 'content' comes in afterwards, 'thinking' becomes None.
 
-            # Handle thinking tokens
-            if thinking_token and not disable_thought_process:
-                thinking_content += thinking_token
+            async for token in raw_response:
+                content_token = token['message'].get('content', "")
+                thinking_token = token['message'].get('thinking', "")
+
+                # If thought process is not disabled, and there's indeed thinking token.
+                if not disable_thought_process and thinking_token:
+
+                    # Create the thinking step if it's not created yet
+                    if 'thinking_step' not in locals():
+                        thinking_step = cl.Step(name="Thought Process", type="llm")
+                        thinking_step.content = ""
+                        await thinking_step.send()
+
+                    response_thinking += thinking_token
+                    await thinking_step.stream_token(thinking_token)
                 
-                # Create the thinking Step if not created yet
-                if thinking_step is None:
-                    thinking_step = cl.Step(name="Thought Process", type="llm")
-                    thinking_step.content = ""
-                    await thinking_step.send()
-                
-                await thinking_step.stream_token(thinking_token)
+                # If response token is not blank.
+                if content_token:
 
-            # Handle actual response content
-            if content_token:
-                response_content += content_token
-                
-                #  Stream it as it comes if streaming is enabled
-                if settings["stream_response"]:
-                    if first_content:
-                        msg.content = content_token
-                        await msg.update()
-                        first_content = False
-                    else:
-                        await msg.stream_token(content_token)
-                # Otherwise, update the main message with FULL response content
-                else:
-                    if "</think>" in response_content:
-                        print(f"\n{datetimestamp()} - INFO - '</think>' tag found in the response.\n")
-                        response_content = response_content.split("</think>")[1]
-                    msg.content = response_content
-        
-        # Update thinking step with FULL thinking content
-        if thinking_step is not None:
-            thinking_step.output = thinking_content
+                    response_content += content_token
+                    await message.stream_token(content_token)
+
+        else:
+
+            # Sample non streamed response (raw):
+# model='deepseek-r1:8b-0528-qwen3-q8_0' created_at='2026-01-06T08:28:21.5275998Z' done=True done_reason='stop' total_duration=4977121700 load_duration=98513600 prompt_eval_count=5 prompt_eval_duration=221512200 eval_count=219 eval_duration=4621499000 message=Message(role='assistant', content='Hello there! 😊 How can I assist you today?', thinking="Hmm, the user just said “Hello there!” in a friendly, ..., so I'll treat this as a genuine human connection attempt rather than just a test query.\n", images=None, tool_name=None, tool_calls=None) logprobs=None
+            # Notice that both 'content' and 'thinking' are already populated.
+
+            if not disable_thought_process and raw_response['message'].get('thinking', ""):
+                response_thinking = raw_response['message'].get('thinking', "") 
+                thinking_step = cl.Step(name="Thought Process", content=response_thinking, type="llm")
+                await thinking_step.send()
+
+            response_content = raw_response['message'].get('content', "")
+            message.content = response_content
+
+        # Update thinking step (if exist) with FULL thinking content, and save to history
+        if 'thinking_step' in locals():
+            thinking_step.output = response_thinking
             await thinking_step.update()
+            history.append(
+                {
+                    "role": "assistant",
+                    "content": response_thinking
+                }
+            )
 
-        # Add audio button to response
-        msg.actions = [
+        # Add audio button to message
+        message.actions = [
             cl.Action(
                 name="tts_button",
                 icon="volume-2",
                 payload={
-                    "message_content": msg.content,
-                    "message_id": msg.id,
+                    "message_content": message.content,
+                    "message_id": message.id,
                 },
             )
         ]
-        print(f"\nResponse message ID - {msg.id}\n")
 
-        # Update the message with the final content
-        await msg.update()
+        # Update the message
+        print(f"\nResponse message ID - {message.id}\n")
+        await message.update()
 
         # Save to session history
         history.append(
             {
                 "role": "assistant",
-                "content": f"{thinking_content}\n\n{response_content}" if thinking_content else response_content,
-                "actions": msg.actions 
+                "content": response_content,
+                "actions": message.actions 
             }
         )
+
         cl.user_session.set("chat_history", history)
 
     except Exception as e:
@@ -283,7 +308,7 @@ async def on_chat_resume(thread: ThreadDict):
     print(f"\non_chat_resume\n- Thread ID: {thread['id']}\n{json.dumps(cl.user_session.get('settings'), indent=4)}\n")
 
     # Enable settings UI (model, temp, etc.) and inherit the old settings
-    await send_chainlit_settings(available_models=AVAILABLE_MODELS, default_model=DEFAULT_MODEL, saved_settings=cl.user_session.get('settings'))
+    await send_chainlit_settings(available_models=AVAILABLE_MODELS, default_model=DEFAULT_MODEL, saved_settings=thread['metadata']['chat_settings'])
 
     # Reconstruct action buttons
     for step in thread['steps'] or []:

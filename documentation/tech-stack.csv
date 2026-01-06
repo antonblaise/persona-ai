@@ -1,7 +1,7 @@
 Component,Selected Technology / Model,Role & Justification (Optimized for 12GB VRAM)
 LLM Runner,Ollama (full GPU acceleration),"Proven, simple local inference with seamless GGUF support and fast model switching."
 Frontend / Hosting,Chainlit (Python-based),"Lightweight, fully customizable local UI: supports chat, multimodal, voice, and easy theming. No branding restrictions. Bound to LAN IP."
-Database,PostgreSQL,"Persistent storage for chat history, users, and memory in advanced setups. Scalable and reliable for multi-user scenarios."
+Database,PostgreSQL and fake AWS S3,"PostgreSQL as the persistent storage for chat history, users, and memory in advanced setups. Scalable and reliable for multi-user scenarios. Fake AWS S3 bucket runs in docket, stores elements like media files."
 Image Generation,FLUX.1 [dev] or FLUX.1 Schnell,"2025 state-of-the-art open-source image model: superior photorealism, prompt adherence, anatomy, and text rendering. Efficient on 12GB VRAM."
 Video Generation,Wan 2.1 / Wan 2.2 (1.3B-14B variants),"Best low-VRAM video model in 2025: generates short clips (8-30s) efficiently (~8-12GB VRAM), with strong motion and quality."
 Multimodal Analysis,Qwen2.5-VL 7B-32B (quantized),Leading local VLM for image/video/document understanding and summarization; excellent OCR and reasoning. Fits quantized on 12GB.

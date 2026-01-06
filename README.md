@@ -161,99 +161,112 @@ In this stage, we will implement the open-source customizable [Chainlit UI](http
 
 **Stage 3 complete** - you now have a full-featured, ChatGPT-style browser interface connected to your local LLM!
 
-### Stage 4️⃣: PostgreSQL Database, UI Customization and TTS
+### Stage 4️⃣: Database Setup and Chat Histories
 
-In this stage, we will enable useful features in Chainlit UI, and also customize the UI to suit our persona's themes.  
+In this stage, we will set up two data storages:
+- PostgreSQL database ─ to store chat histories
+- A fake AWS S3 bucket ─ to store elements (i.e. media and document files like audio, picture, PDF, etc)  
 
-1. Chainlit Database and Chat Histories  
-    First of all, for chat history and sidebar to be enabled, we need to integrate PostgreSQL to Chainlit.  
+With data storage enabled, we enable the chat histories sidebar, where we can freely switch between different chatboxes anytime. FYI, chat histories are completely isolated between users.
 
-    - **Create PostgreSQL database for the AI**  
-        We will use our own PostgreSQL database on our own local computer instead of the one created by `chainlit-datalayer` on the next step.  
-        Open `pgAdmin` on your computer.  
-        On `Object Explorer` panel, right-click on `Servers > PostgreSQL > Databases`.  
-        Then click on `Create > Database`.  
-        Name it as `persona-ai`, and then click `Save`.  
-        (Of course you may use another name, but we'll be using the name `persona-ai` throughout this guide)  
-        The newly created database now shows under `Databases`.  
 
-    - **Use Chainlit's official datalayer as the database**  
-        In this step, we will create and run 2 Docker containers:
-        - A new empty PostgreSQL, which we will **not** use.
-        - A fake S3 bucket - to simulate cloud storage for elements.
+1. **Create PostgreSQL database for the AI**  
+    We will use our own PostgreSQL database on our own local computer instead of the one created by `chainlit-datalayer` on the next step.  
+    Open `pgAdmin` on your computer.  
+    On `Object Explorer` panel, right-click on `Servers > PostgreSQL > Databases`.  
+    Then click on `Create > Database`.  
+    Name it as `persona-ai`, and then click `Save`.  
+    (Of course you may use another name, but we'll be using the name `persona-ai` throughout this guide)  
+    The newly created database now shows under `Databases`.  
 
-        We do not use the PostgreSQL from the container, because as I tested, somehow the `root` user with password `root` is not authenticated.
+2. **Use Chainlit's official datalayer as the database**  
+    In this step, we will create and run 2 Docker containers:
+    - A new empty PostgreSQL, which we will **not** use.
+    - A fake S3 bucket - to simulate cloud storage for elements.
 
-        In a folder **outside** of this project folder, clone the [chainlit-datalayer](https://github.com/Chainlit/chainlit-datalayer) repository:
-        ```cmd
-        git clone https://github.com/Chainlit/chainlit-datalayer
-        ```
+    We do not use the PostgreSQL from the container, because as I tested, somehow the `root` user with password `root` is not authenticated.
 
-        Navigate into the `chainlit-datalayer` folder, create a file named `.env` in its root directory.
-        Copy paste all these lines into `.env`:
-        ```
-        DATABASE_URL=postgresql://<database owner name>:<password>@localhost:5432/persona-ai
-        ```
-        For example:
-        ```
-        DATABASE_URL=postgresql://postgres:postgres_Password@localhost:5432/persona-ai
-        ```
-        _⚠️ **IMPORTANT**  
-        If your password contains special characters like `!@#`, encode them using URL/Percent encoding ─ `%21%40%23`.  
-        Use this website to help you: https://www.url-encode-decode.com_
+    In a folder **outside** of this project folder, clone the [chainlit-datalayer](https://github.com/Chainlit/chainlit-datalayer) repository:
+    ```cmd
+    git clone https://github.com/Chainlit/chainlit-datalayer
+    ```
 
-        (Optional) Comment out/Delete the `postgres` service in the `compose.yml`, so the `postgres` container won't be created. Or just delete it later on.
+    Navigate into the `chainlit-datalayer` folder, create a file named `.env` in its root directory.
+    Copy paste all these lines into `.env`:
+    ```
+    DATABASE_URL=postgresql://<database owner name>:<password>@localhost:5432/persona-ai
+    ```
+    For example:
+    ```
+    DATABASE_URL=postgresql://postgres:postgres_Password@localhost:5432/persona-ai
+    ```
+    _⚠️ **IMPORTANT**  
+    If your password contains special characters like `!@#`, encode them using URL/Percent encoding ─ `%21%40%23`.  
+    Use this website to help you: https://www.url-encode-decode.com_
 
-        Now, to enable the fake AWS S3 cloud storage container ─ still in the root directory, run these:
-        ```cmd
-        docker compose up -d 
-        ```
+    (Optional) Comment out/Delete the `postgres` service in the `compose.yml`, so the `postgres` container won't be created. Or just delete it later on.
 
-        Notice that the container named `chainlit-datalayer-localstack-1` is not created and running.  
-        That's where chat media (audio, pictures, etc) aka chat elements will be stored, because they'll **not** be stored on PostgreSQL.
+    Now, to enable the fake AWS S3 cloud storage container ─ still in the root directory, run these:
+    ```cmd
+    docker compose up -d 
+    ```
 
-        We need to migrate the database schema of the `chainlit-datalayer` into our PostgreSQL database.  
-        Still in the `chainlit-datalayer` repository's root directory, run:
-        ```
-        npx prisma migrate deploy
-        ```
-        Given that your `DATABASE_URL` in the `.env` is given correctly, the command should work. Now, our DB follows the official schema of `chainlit-datalayer`.
+    Notice that the container named `chainlit-datalayer-localstack-1` is not created and running.  
+    That's where chat media (audio, pictures, etc) aka chat elements will be stored, because they'll **not** be stored on PostgreSQL.
 
-        (Optional) The database can be viewed and edited in a browser by running this command in the `chainlit-datalayer` root directory:
-        ```cmd
-        npx prisma studio
-        ```
+3. **Migrate the official database schema of `chainlit-datalayer` into our PostgreSQL database**  
+    We need to migrate the database schema of the `chainlit-datalayer` into our PostgreSQL database.  
+    Still in the `chainlit-datalayer` repository's root directory, run:
+    ```
+    npx prisma migrate deploy
+    ```
+    Given that your `DATABASE_URL` in the `.env` is given correctly, the command should work. Now, our DB follows the official schema of `chainlit-datalayer`.
 
-        With this, we're done with working in the `chainlit-datalayer` repository.
+    (Optional) The database can be viewed and edited in a browser by running this command in the `chainlit-datalayer` root directory:
+    ```cmd
+    npx prisma studio
+    ```
 
-    - **Setup Chainlit environment in our project**  
-        Copy the `.env` file created in `chainlit-datalayer` folder just now into this project ─ `persona-ai`'s root directory.  
-        Run this command in this project's root directory:
-        ```
-        chainlit create-secret
-        ```
-        This will create the Chainlit JWT secret needed to run the Python script that powers Chainlit ─ `app.py`.
-        Copy the whole line into the `.env` file.
-        Now, the `.env` file should look like this:
-        ```
-        DATABASE_URL=postgresql://<database owner name>:<password>@localhost:5432/<database name>
-        CHAINLIT_AUTH_SECRET="*abcdefghijklmnopqrstuvwxyz!@#$%^&><:?0123456789"
-        ```
+    With this, we're done with working in the `chainlit-datalayer` repository.
 
-        Use `ipconfig` to get the LAN IP address of your host machine. E.g.: 192.168.0.12
-        
-        Copy and paste these lines into **your** `.env` file. Put in your host machine's LAN address.
-        ```
-        # S3 configuration.
-        BUCKET_NAME=my-bucket
-        APP_AWS_ACCESS_KEY=random-key
-        APP_AWS_SECRET_KEY=random-key
-        APP_AWS_REGION=eu-central-1
-        DEV_AWS_ENDPOINT=http://<host's LAN IP address>:4566
-        ```
-        These are the configurations to connect to the fake AWS S3 cloud storage. 
+4. **Setup Chainlit environment in our project**  
+    Copy the `.env` file created in `chainlit-datalayer` folder just now into this project ─ `persona-ai`'s root directory.  
+    Run this command in this project's root directory:
+    ```
+    chainlit create-secret
+    ```
+    This will create the Chainlit JWT secret needed to run the Python script that powers Chainlit ─ `app.py`.
+    Copy the whole line into the `.env` file.
+    Now, the `.env` file should look like this:
+    ```
+    DATABASE_URL=postgresql://<database owner name>:<password>@localhost:5432/<database name>
+    CHAINLIT_AUTH_SECRET="*abcdefghijklmnopqrstuvwxyz!@#$%^&><:?0123456789"
+    ```
 
-2. Chainlit Environment Configuration for `app.py`  
+    Use `ipconfig` to get the LAN IP address of your host machine. E.g.: 192.168.0.12
+    
+    Copy and paste these lines into **your** `.env` file. Put in your host machine's LAN address.
+    ```
+    # S3 configuration.
+    BUCKET_NAME=my-bucket
+    APP_AWS_ACCESS_KEY=random-key
+    APP_AWS_SECRET_KEY=random-key
+    APP_AWS_REGION=eu-central-1
+    DEV_AWS_ENDPOINT=http://<host's LAN IP address>:4566
+    ```
+    These are the configurations to connect to the fake AWS S3 cloud storage.   
+
+**Stage 4 complete** - your AI chat interface now has persistent chat histories and sidebar enabled!
+
+### Stage 5️⃣: Persona, Customization and TTS  
+
+In this stage, we will:  
+- configure environment variables for our Chainlit app
+- craft a system prompt `.txt` file template to customize the persona, filled dynamically based on `.json` files of each user  
+- design our Chainlit UI as we like
+- implement text-to-speech (TTS) to generate voice for responses
+
+1. Chainlit Environment Configuration for `app.py`  
     First of all, paste these into your `.env` file:
     ```
     # Network & Server Settings
@@ -275,7 +288,7 @@ In this stage, we will enable useful features in Chainlit UI, and also customize
     RESPONSE_AUDIO_FOLDER=storage/audio
     ```
     Explanation:
-    - `CHAINLIT_HOST`: Host on the LAN IP address.
+    - `CHAINLIT_HOST`: Host on the LAN IP address. Using `0.0.0.0` exposes the Chainlit page to the LAN.
     - `CHAINLIT_PORT`: The LAN IP port to use.
     - `OLLAMA_NUM_PARALLEL`: How many concurrent users can be processed at once.  
     - `OLLAMA_MAX_LOADED_MODELS`: The number of LLM models Ollama keeps loaded in memory (VRAM/RAM) simultaneously.  
@@ -285,11 +298,14 @@ In this stage, we will enable useful features in Chainlit UI, and also customize
     - `VOICE_SAMPLE_PATH`: Voice sample to clone for your AI persona.  
     - `RESPONSE_AUDIO_FOLDER`: Output folder for audio files (.wav) generated from persona's response text.
 
-    Now, create the `public` folder in the root directory of this project. We'll be using this folder extensively in the upcoming steps.  
+2. Create Allowed Users 
+    Create the `public` folder in the root directory of this project.  
+
+    We'll be using this folder extensively in the upcoming steps.  
 
     In the `public` folder, create a folder named `users`.  
 
-    Copy `templates/users.json` into `public/users`, open and fill in the fields accordingly and rename it to the username of the allowed user. `app.py` generates a unique system prompt of each user based on their JSON file here.   
+    Copy `templates/users.json` into `public/users`, open and fill in the fields accordingly and **rename** it to the **username** of the allowed user. `app.py` generates a unique system prompt of each user based on their JSON file here.   
 
     **Important note on filling up the users' system prompt JSONs:**  
     Use 3rd person (he/him/she/her/they/them/this user/...) pronouns to address the user.  
@@ -301,21 +317,24 @@ In this stage, we will enable useful features in Chainlit UI, and also customize
     ```
 
     There can be more than one of this JSON files. Each JSON file means each allowed user.  
-    FYI, chat histories are **not** shared among users.  
+    FYI once again, chat histories are **not** shared among users.  
 
-    Next, copy `templates/persona.json` into `public` folder. Open and fill in the fields accordingly. This JSON file defines the global settings, configurations and personalities of your persona.  
+3. Customize The Persona Using System Prompt
+
+    Copy `templates/persona.json` into `public` folder. Open and fill in the fields accordingly. This JSON file defines the global settings, configurations and personalities of your persona.  
     Feel free to modify `app.py` and `templates/system-prompt.txt` as you need.
+    
     ```
     persona-ai/
     ├── public/
     |   ├── users/
     |   |   └── <username>.json
-    |   └── persona.json
+    |   └── persona.json                <----- Modify the fields of this file as needed to customize your persona
     ├── app.py
     └── bcrypt-hash.py
     ```
 
-3. Chainlit UI Customization  
+4. Chainlit UI Customization  
     Chainlit offers deep customization of its UI. Here, we will go through some of the basics:  
 
     ```
@@ -385,7 +404,7 @@ In this stage, we will enable useful features in Chainlit UI, and also customize
     
     Feel free to explore and experiment around for more customizations!
 
-4. Enable TTS Voice for Responses  
+5. Enable TTS Voice for Responses  
     Create a folder named `voice` in `public` folder. Put the voice sample for your persona into the folder as `persona.wav`.  
     _Recommended: Clear audio with no background music or noise, between 30 seconds and 3 minutes._  
 
@@ -396,7 +415,7 @@ In this stage, we will enable useful features in Chainlit UI, and also customize
             └── persona.wav
     ```
 
-**Stage 4 complete** - you now have a fully customizable AI chat frontend UI with multiple LLM models, with a fully configurable AI persona with voice support, who can switch its personalities depending on who it's interacting with!
+**Stage 4 complete** - you now have a fully customizable AI chat frontend UI, persistent chat histories in sidebar, with multiple LLM models, with a fully configurable AI persona with voice support, who can switch its personalities depending on which user it's interacting with!
 
 ### Stage 5️⃣: Image generation
 
