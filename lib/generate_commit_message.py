@@ -79,7 +79,7 @@ async def talk_to_llm(prompt: str) -> str:
 
     async_client = AsyncClient()
     response = await async_client.chat(
-        model="gpt-oss:120b-cloud",
+        model="deepseek-v3.1:671b-cloud",
         messages=[{"role": "user", "content": prompt}],
         stream=False,
         think=False

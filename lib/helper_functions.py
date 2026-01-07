@@ -9,7 +9,6 @@ from pathlib import Path
 import chainlit as cl
 from chainlit.input_widget import Select, Slider, Switch
 from pydub import AudioSegment
-from gradio_client import Client
 
 
 def datetimestamp(no_space=False) -> str:
@@ -151,24 +150,7 @@ def join_wav_files(wav_files: list, output_wav_path: str):
                 retry_attempt += 1
                 print(f"\nCombination failed.\nExpected output .wav length: {total_wav_length}\nActual output .wav length: {len(AudioSegment.from_wav(output_wav_path))}\n")
 
-def text_to_speech(client: Client, input_text: str, voice_sample: dict | None):
-    # Generate audio .wav file from given text
 
-    response_audio = client.predict(
-        text=input_text,
-        reference_id="",
-        reference_audio=voice_sample,
-        max_new_tokens=0,
-        chunk_length=400,
-        top_p=0.8,
-        repetition_penalty=1.1,
-        temperature=0.8,
-        seed=0,
-        use_memory_cache="on",
-        api_name="/partial"
-    )
-
-    return response_audio
 
 
 # ---------------------------------------------------- Async functions ---------------------------------------------------- #
@@ -223,3 +205,4 @@ async def send_chainlit_settings(available_models: list, default_model: str, sav
     ).send()
 
     cl.user_session.set("settings", settings)
+

@@ -11,11 +11,13 @@ from ollama import AsyncClient
 
 # ==================== TTS ====================
 from gradio_client import Client, handle_file
+from langdetect import detect
 
 # ==================== Utilities ====================
 import json
 import bcrypt
 import shutil
+import asyncio
 
 # ==================== Typing ====================
 from typing import Optional
@@ -27,9 +29,11 @@ from chainlit.types import ThreadDict
 # ==================== Chainlit Data Layer (optional/custom) ====================
 import chainlit.data.chainlit_data_layer as cl_data
 import boto3
+import botocore
 
 # ==================== Custom functions ====================
 from lib.helper_functions import *
+from lib.ai_functions import *
 
 # --------------------- Global Setup --------------------- #
 
@@ -164,8 +168,8 @@ async def on_message(message: cl.Message):
 
     try:
 
-        # Initialize variables
-        message = cl.Message(content="💭")
+        # Create and send blank message first
+        message = cl.Message(content="")
         await message.send()
 
         # Initialize options
@@ -357,8 +361,8 @@ async def generate_audio_for_step(action: cl.Action):
 
     # Get voice sample
     if os.path.isfile(VOICE_SAMPLE_PATH):
-        print(f"\n\n{'-'*50}\n\nFish Audio will use '{VOICE_SAMPLE_PATH}' as the sample audio.\n\n")
-        voice_sample = handle_file(fr"{VOICE_SAMPLE_PATH}")
+        print(f"\n\n{'-'*50}\n\nTTS will use '{VOICE_SAMPLE_PATH}' as the sample audio.\n\n")
+        voice_sample = VOICE_SAMPLE_PATH
     else:
         warning_message = f"\n\n{'-'*50}\n\nNo voice sample given. Fish Audio will use a random voice.\n\n"
         print(warning_message)
@@ -393,60 +397,122 @@ async def generate_audio_for_step(action: cl.Action):
     os.mkdir(audio_folder_of_user) if not os.path.isdir(audio_folder_of_user) else None
 
     audio_filename = f"{username}_{message_id}.wav"
-    audio_output_file = f"{audio_folder_of_user}/{audio_filename}"
-
-    # ------- Enable TTS voice button with Voice Cloning - fishaudio/fish-speech -------
-    if not os.path.isfile(audio_output_file):
-        tts_client = Client("http://localhost:8081")
-        response_paragraphs_audio: list = []
-
-        for i, paragraph in enumerate(response_paragraphs):
-
-            print(f"\nParagraph {i+1}/{len(response_paragraphs)}:\n{paragraph}\n")
-
-            try:
-                # Generate audio .wav file
-                response_audio = text_to_speech(client=tts_client, input_text=paragraph, voice_sample=voice_sample)
-            except Exception as e:
-                await cl.Message(
-                    content=f"⚠️ `{str(e)}`",
-                    author="System",
-                    type="system_message"
-                ).send()
-                print(f"{datetimestamp()} - ERROR - TTS generation failed: {e}")
-                return None
-
-            # Collect all the .wav files into a list of their paths
-            response_paragraphs_audio.append(response_audio[0])
-
-        # Combine into one final .wav file, save as audio_output_file and ... upload to S3
-        join_wav_files(response_paragraphs_audio, audio_output_file)
-
-    # ... upload to S3
-    s3_client.upload_file(audio_output_file, BUCKET_NAME, audio_filename)
-
     url_of_the_wav_file = f"{DEV_AWS_ENDPOINT}/{BUCKET_NAME}/{audio_filename}"
 
-    print(f"\nAudio file '{audio_filename}' uploaded to S3 at:\n\t{url_of_the_wav_file}\n")
+    # Check if the audio has already been generated and uploaded to S3
+    try:
 
-    # Create Chainlit audio element
-    audio_element = cl.Audio(
-        url=url_of_the_wav_file,
-        mime="audio/wav",
-        display="inline",
-    )
+        s3_client.head_object(Bucket=BUCKET_NAME, Key=audio_filename)
 
-    # Point to the message and append the audio element into it.
-    message = cl.Message(
-        id=message_id,
-        content=full_response,
-        elements=[audio_element],
-        metadata={
-            "audio_url": url_of_the_wav_file
-        }
-    )
+    except botocore.exceptions.ClientError as e:
 
-    await message.update()
+        # 404 means the file was not found
+        if e.response['Error']['Code'] == "404":
+
+            # --------------- TTS Starts Here --------------- #
+
+            #       Detect if it's Arabic. If yes, use Coqui XTTS-v2
+            response_language = detect(full_response*200)
+
+            if response_language in ["ar"]:
+
+                #       Put import TTS here to greatly reduce Chainlit app startup time.
+                from TTS.api import TTS
+
+                audio_output_file = f"{audio_folder_of_user}/{audio_filename}"
+
+                try:
+                    tts = TTS("tts_models/multilingual/multi-dataset/xtts_v2")
+                    tts.to("cuda")
+
+                    emotions = asyncio.run(describe_emotions(full_response))
+                    print(f"Emotions: {emotions}")
+
+                    #       generate speech by cloning a voice using default settings
+                    tts.tts_to_file(
+                        text=emoji.replace_emoji(full_response, ""),
+                        file_path=audio_output_file,
+                        speaker_wav=VOICE_SAMPLE_PATH,
+                        language=response_language,
+                        emotion=emotions
+                    )
+                except Exception as e:
+                    await cl.Message(
+                        content=f"⚠️ `{str(e)}`",
+                        author="System",
+                        type="system_message"
+                    ).send()
+                    print(f"{datetimestamp()} - ERROR - [XTTS-v2] TTS generation failed: {e}")
+                    return None
+
+            #       Otherwise, use fishaudio/fish-speech
+            else:
+
+                audio_output_file = f"{audio_folder_of_user}/{audio_filename}"
+
+                if not os.path.isfile(audio_output_file):
+                    tts_client = Client("http://localhost:7860")
+                    response_paragraphs_audio: list = []
+
+                    for i, paragraph in enumerate(response_paragraphs):
+
+                        print(f"\nParagraph {i+1}/{len(response_paragraphs)}:\n{paragraph}\n")
+
+                        try:
+                            #       Generate audio .wav file
+                            response_audio = fishaudio_tts(client=tts_client, input_text=paragraph, voice_sample=handle_file(voice_sample))
+                        except Exception as e:
+                            await cl.Message(
+                                content=f"⚠️ `{str(e)}`",
+                                author="System",
+                                type="system_message"
+                            ).send()
+                            print(f"{datetimestamp()} - ERROR - Fish Audio TTS generation failed: {e}")
+                            return None
+
+                        #       Collect all the .wav files into a list of their paths
+                        response_paragraphs_audio.append(response_audio[0])
+
+                    #       Combine into one final .wav file, save as audio_output_file and ... upload to S3
+                    join_wav_files(response_paragraphs_audio, audio_output_file)
+
+                # --------------- TTS End Here --------------- #
+
+            # ... upload to S3 since not exist on S3 yet
+            s3_client.upload_file(audio_output_file, BUCKET_NAME, audio_filename)
+
+            # Create Chainlit audio element
+            audio_element = cl.Audio(
+                url=url_of_the_wav_file,
+                mime="audio/wav",
+                display="inline",
+            )
+
+            # Point to the message and append the audio element into it.
+            message = cl.Message(
+                id=message_id,
+                content=full_response,
+                elements=[audio_element],
+                metadata={
+                    "audio_url": url_of_the_wav_file
+                }
+            )
+
+            await message.update()
+
+        else:
+
+            # If it's another error (like no permission), re-raise it
+            raise e
+    
+    # Finally, show the S3 URL of the .wav file
+    print(f"\nAudio file '{audio_filename}' is on S3 at:\n\t{url_of_the_wav_file}\n")
+
+
+
+
+
+
 
     
 

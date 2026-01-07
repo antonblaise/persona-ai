@@ -10,8 +10,9 @@ gradio_client>=2.0.2
 # Language detection for TTS
 langdetect>=1.0.9
 
-# Hugging Face CLI to download XTTS models 
+# Hugging Face CLI to download AI models there 
 huggingface-hub>=0.36.0
+hf-xet>=1.2.0
 
 # Required pinned version for XTTS compatibility
 transformers==4.36.2

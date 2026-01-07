@@ -1,0 +1,21 @@
+services:
+
+  # --- Fish Sppech ---
+  fish-speech:
+    image: fishaudio/fish-speech:latest
+    container_name: fish-speech
+    ports:
+      - "7860:7860"
+    environment:
+      - BACKEND=cuda
+      - COMPILE=1
+    volumes:
+      - "./models/fishaudio:/app/checkpoints"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    restart: unless-stopped

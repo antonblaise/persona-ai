@@ -5,6 +5,8 @@ assets/
 __pycache__/
 public/
 storage/
+models/
+ComfyUI/
 
 # Files
 desktop.ini

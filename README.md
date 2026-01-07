@@ -19,6 +19,16 @@ You clone it, run the setup, and mold your companion from scratch: give it a nam
 **Tech Stack Summary**  
 See `documentation/tech-stack.csv` for the full finalized stack.
 
+## Navigation Lobby
+- [Quick Start](#quick-start)
+- [Setup Guide (Windows 11 + NVIDIA GPU)](#setup-guide-windows-11--nvidia-gpu)
+    - [Stage 1: Environment Setup](#stage-1️⃣-environment-setup)
+    - [Stage 2: Pull the LLM models](#stage-2️⃣-pull-the-llm-models)
+    - [Stage 3: Chainlit UI Deployment](#stage-3️⃣-chainlit-ui-deployment)
+    - [Stage 4: Database Setup and Chat Histories](#stage-4️⃣-database-setup-and-chat-histories)
+    - [Stage 5: Persona, Customization and TTS](#stage-5️⃣-persona-customization-and-tts)
+    - [Stage 6: Image Generation](#stage-6️⃣-image-generation)
+
 ## Quick Start
 
 ### ⚠️ Make sure you've completed the Setup Guide!  
@@ -30,13 +40,14 @@ docker start chainlit-datalayer-localstack-1
 conda create -n persona-ai python=3.11 -y
 conda activate persona-ai
 conda install -c conda-forge ffmpeg
-pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/<cu***>
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
 pip install -r requirements.txt
-hf download fishaudio/openaudio-s1-mini --local-dir public/fishaudio/models/openaudio-s1-mini
-docker run -d --name fish-speech -p 8081:7860 --gpus all -v "%CD%\public\fishaudio\models":/app/checkpoints -e BACKEND=cuda -e COMPILE=1 fishaudio/fish-speech:latest
+hf download fishaudio/openaudio-s1-mini --local-dir models/fishaudio/openaudio-s1-mini
+hf download coqui/XTTS-v2 --local-dir models/coqui/XTTS-v2
+hf download city96/FLUX.1-dev-gguf flux1-dev-Q8_0.gguf --local-dir "%CD%\models\city96/FLUX.1-dev-gguf"
 launcher.bat
 ```
-`<cu***>`: Find out the correct version for your GPU. For example, RTX 4070 uses 'cu121'.
+`cu121`: Find out the correct version for your GPU. For example, RTX 4070 uses 'cu121'.
 
 ## Setup Guide (Windows 11 + NVIDIA GPU)
 
@@ -414,13 +425,31 @@ In this stage, we will:
         └── voice/
             └── persona.wav
     ```
+    Run these commands:
+    ```cmd
+    hf download fishaudio/openaudio-s1-mini --local-dir models/fishaudio/openaudio-s1-mini
+    docker run -d --name fish-speech -p 7860:7860 --gpus all -v "%CD%\models\fishaudio":/app/checkpoints -e BACKEND=cuda -e COMPILE=1 fishaudio/fish-speech:latest
+    ```
+    What they do:
+    - Download the `openaudio-s1-mini` TTS model from Fish Audio
+    - Download the `fish-speech` Docker image from Fish Audio
+    - Create and run a Docker container named `fish-speech` using the image, with the TTS model mapped to the container
+    With this, the TTS has become a module that our app calls. This suits the philosophy of modularity of this project.
 
-**Stage 4 complete** - you now have a fully customizable AI chat frontend UI, persistent chat histories in sidebar, with multiple LLM models, with a fully configurable AI persona with voice support, who can switch its personalities depending on which user it's interacting with!
 
-### Stage 5️⃣: Image generation
+**Stage 5 complete** - you now have a fully customizable AI chat frontend UI, persistent chat histories in sidebar, with multiple LLM models, with a fully configurable AI persona with voice support, who can switch its personalities depending on which user it's interacting with!
+
+### Stage 6️⃣: Image Generation
 
 1. Install ComfyUI  
-    Go to this link, download and install ComfyUI: https://www.comfy.org/download  
-    After installed, launch it for further setups.
+    Go to this link: https://github.com/comfyanonymous/ComfyUI/releases  
+    Download `ComfyUI_windows_portable_nvidia_cu***.7z` and extract it into somewhere you can remember and find easily.  
+    Do not launch it yet.  
+    In `ComfyUI_windows_portable` folder, further navigate into this folder: `ComfyUI\custom_nodes`  
+    Open a CMD here and run:
+    ```
+    git clone https://github.com/ltdrdata/ComfyUI-Manager.git comfyui-manager
+    ```
+    Then, go back to `ComfyUI_windows_portable` and start `run_nvidia_gpu.bat`.
 
 ...
